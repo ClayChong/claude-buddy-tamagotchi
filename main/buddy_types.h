@@ -35,7 +35,18 @@ typedef enum {
     BUDDY_CHARACTER_CELEBRATE,
     BUDDY_CHARACTER_PAIRING,
     BUDDY_CHARACTER_CONFIRMATION,
+    BUDDY_CHARACTER_EAT,
+    BUDDY_CHARACTER_PLAY,
+    BUDDY_CHARACTER_PAT,
+    BUDDY_CHARACTER_REFUSE,
 } buddy_character_t;
+
+typedef enum {
+    BUDDY_CARE_FEED,
+    BUDDY_CARE_PLAY,
+    BUDDY_CARE_PAT,
+    BUDDY_CARE_COUNT,
+} buddy_care_t;
 
 typedef enum {
     BUDDY_MOOD_NORMAL,
@@ -276,7 +287,7 @@ typedef struct {
     buddy_settings_item_t settings_selection;
     buddy_reset_item_t reset_selection;
     buddy_menu_item_t menu_selection;
-    uint8_t pet_page;
+    buddy_care_t care_selection;
     uint8_t info_page;
     bool menu_open;
     bool reset_open;

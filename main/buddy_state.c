@@ -12,6 +12,9 @@
 #define BUDDY_NIGHT_END_HOUR 7
 #define BUDDY_PET_SAVE_INTERVAL_MS 600000ULL
 #define BUDDY_PET_CATCH_UP_MAX_S 86400U
+#define BUDDY_REACTION_MS 3000ULL
+#define BUDDY_APPROVAL_GUARD_MS 1000ULL
+#define BUDDY_PAT_BURST_MS 3000ULL
 #define BUDDY_TOKEN_CELEBRATION_STEP 50000
 
 static void buddy_copy(char *destination, size_t destination_size, const char *source)
@@ -264,7 +267,62 @@ static void buddy_settings_click(buddy_state_t *state, buddy_key_t key,
     }
 }
 
-static void buddy_normal_click(buddy_state_t *state, buddy_key_t key,
+static void buddy_pet_save_action(buddy_state_t *state, uint64_t now_ms, buddy_action_t *action);
+
+static void buddy_react(buddy_state_t *state, buddy_character_t character, uint64_t now_ms)
+{
+    state->temporary_character = character;
+    state->temporary_until_ms = now_ms + BUDDY_REACTION_MS;
+}
+
+/* True when this pat is the fifth within BUDDY_PAT_BURST_MS; the history then
+ * starts over. pat_ms holds up to four earlier pats, oldest first. */
+static bool buddy_pat_burst(buddy_state_t *state, uint64_t now_ms)
+{
+    const size_t slots = sizeof(state->pat_ms) / sizeof(state->pat_ms[0]);
+
+    if (state->pat_count == slots && now_ms - state->pat_ms[0] <= BUDDY_PAT_BURST_MS) {
+        state->pat_count = 0;
+        return true;
+    }
+    if (state->pat_count == slots) {
+        memmove(&state->pat_ms[0], &state->pat_ms[1], (slots - 1U) * sizeof(state->pat_ms[0]));
+        --state->pat_count;
+    }
+    state->pat_ms[state->pat_count++] = now_ms;
+    return false;
+}
+
+static void buddy_care(buddy_state_t *state, buddy_care_t care, uint64_t now_ms,
+                       buddy_action_t *action)
+{
+    switch (care) {
+    case BUDDY_CARE_FEED:
+        if (buddy_pet_feed(&state->pet)) {
+            buddy_react(state, BUDDY_CHARACTER_EAT, now_ms);
+        } else {
+            buddy_react(state, BUDDY_CHARACTER_REFUSE, now_ms);
+            buddy_copy(state->message, sizeof(state->message), "Not hungry");
+        }
+        break;
+    case BUDDY_CARE_PLAY:
+        buddy_pet_play(&state->pet);
+        buddy_react(state, BUDDY_CHARACTER_PLAY, now_ms);
+        break;
+    case BUDDY_CARE_PAT:
+    default:
+        if (buddy_pat_burst(state, now_ms)) {
+            buddy_react(state, BUDDY_CHARACTER_DIZZY, now_ms);
+        } else {
+            buddy_pet_pat(&state->pet);
+            buddy_react(state, BUDDY_CHARACTER_PAT, now_ms);
+        }
+        break;
+    }
+    buddy_pet_save_action(state, now_ms, action);
+}
+
+static void buddy_normal_click(buddy_state_t *state, buddy_key_t key, uint64_t now_ms,
                                buddy_action_t *action)
 {
     if (state->menu_open) {
@@ -306,8 +364,12 @@ static void buddy_normal_click(buddy_state_t *state, buddy_key_t key,
                                                           : BUDDY_PAGE_HOME);
         buddy_set_ui_refresh(action);
     } else if (key == BUDDY_KEY_DOWN && state->page == BUDDY_PAGE_PET) {
-        state->pet_page = (uint8_t)((state->pet_page + 1U) % 2U);
+        state->care_selection = (buddy_care_t)((state->care_selection + 1U) % BUDDY_CARE_COUNT);
         buddy_set_ui_refresh(action);
+    } else if (key == BUDDY_KEY_OK && state->page == BUDDY_PAGE_PET) {
+        buddy_care(state, state->care_selection, now_ms, action);
+    } else if (key == BUDDY_KEY_OK && state->page == BUDDY_PAGE_HOME) {
+        buddy_care(state, BUDDY_CARE_PAT, now_ms, action);
     } else if (key == BUDDY_KEY_DOWN && state->page == BUDDY_PAGE_INFO) {
         state->info_page = (uint8_t)((state->info_page + 1U) % 6U);
         buddy_set_ui_refresh(action);
@@ -759,7 +821,10 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
             break;
         }
         if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_OK) {
-            buddy_decide_prompt(state, event, BUDDY_PERMISSION_ONCE, action);
+            /* A press in the prompt's first second was meant for something else. */
+            if (now_ms >= state->prompt_shown_ms + BUDDY_APPROVAL_GUARD_MS) {
+                buddy_decide_prompt(state, event, BUDDY_PERMISSION_ONCE, action);
+            }
         } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_DOWN) {
             buddy_decide_prompt(state, event, BUDDY_PERMISSION_DENY, action);
         } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_UP) {
@@ -768,7 +833,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
                 action->scroll_delta = -48;
             }
         } else if (!buddy_has_prompt(state)) {
-            buddy_normal_click(state, event->key, action);
+            buddy_normal_click(state, event->key, now_ms, action);
         }
         break;
     case BUDDY_EVENT_KEY_LONG:
@@ -817,7 +882,7 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     snapshot->settings_selection = state->settings_selection;
     snapshot->reset_selection = state->reset_selection;
     snapshot->menu_selection = state->menu_selection;
-    snapshot->pet_page = state->pet_page;
+    snapshot->care_selection = state->care_selection;
     snapshot->info_page = state->info_page;
     snapshot->menu_open = state->menu_open;
     snapshot->reset_open = state->reset_open;

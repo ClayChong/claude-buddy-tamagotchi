@@ -257,7 +257,7 @@ static void test_approval_locks_until_a_new_prompt(void)
     buddy_state_reduce(&state, &prompt, 2200, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(!snapshot.approval_locked);
-    buddy_state_reduce(&state, &approve, 2201, &action);
+    buddy_state_reduce(&state, &approve, 3200, &action);
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(strcmp(action.permission.id, "req-2") == 0);
 }
@@ -292,7 +292,7 @@ static void test_permission_action_is_bound_to_the_prompt_connection(void)
     prompt.ble.connection_generation = 7;
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
 
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(action.permission.connection_generation == 7);
@@ -310,14 +310,14 @@ static void test_permission_success_moves_from_attempted_to_successful_state(voi
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(strcmp(state.last_attempted_prompt_id, "req-success") == 0);
     assert(state.last_successful_decision_id[0] == '\0');
     assert(state.permission_delivery == BUDDY_PERMISSION_DELIVERY_SENDING);
     assert(state.character != BUDDY_CHARACTER_HEART);
 
-    buddy_state_reduce(&state, &result, 1002, &action);
+    buddy_state_reduce(&state, &result, 2001, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(action.type == BUDDY_ACTION_UI_REFRESH);
     assert(strcmp(state.last_successful_decision_id, "req-success") == 0);
@@ -337,8 +337,8 @@ static void test_permission_failure_is_visible_and_same_id_replay_stays_locked(v
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
-    buddy_state_reduce(&state, &failure, 1002, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
+    buddy_state_reduce(&state, &failure, 2001, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(snapshot.permission_delivery == BUDDY_PERMISSION_DELIVERY_FAILED);
     assert(strcmp(state.last_attempted_prompt_id, "req-failed") == 0);
@@ -346,8 +346,8 @@ static void test_permission_failure_is_visible_and_same_id_replay_stays_locked(v
     assert(state.approval_locked);
     assert(state.character != BUDDY_CHARACTER_HEART);
 
-    buddy_state_reduce(&state, &prompt, 1003, &action);
-    buddy_state_reduce(&state, &approve, 1004, &action);
+    buddy_state_reduce(&state, &prompt, 2002, &action);
+    buddy_state_reduce(&state, &approve, 3002, &action);
     assert(action.type == BUDDY_ACTION_NONE);
     assert(state.permission_delivery == BUDDY_PERMISSION_DELIVERY_FAILED);
 }
@@ -385,11 +385,11 @@ static void test_successful_approval_heart_expires_at_five_seconds(void)
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
-    buddy_state_reduce(&state, &result, 1002, &action);
-    buddy_state_reduce(&state, &tick, 6001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
+    buddy_state_reduce(&state, &result, 2001, &action);
+    buddy_state_reduce(&state, &tick, 7000, &action);
     assert(state.character == BUDDY_CHARACTER_HEART);
-    buddy_state_reduce(&state, &tick, 6002, &action);
+    buddy_state_reduce(&state, &tick, 7001, &action);
     assert(state.character == BUDDY_CHARACTER_BUSY);
 }
 
@@ -404,28 +404,29 @@ static void test_heartbeat_prompt_snapshot_clears_or_preserves_approval_lock(voi
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
     assert(state.approval_locked);
 
     heartbeat.heartbeat.connected = true;
-    buddy_state_reduce(&state, &heartbeat, 1002, &action);
+    buddy_state_reduce(&state, &heartbeat, 2001, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(!snapshot.approval_locked);
     assert(snapshot.prompt_id[0] == '\0');
 
     heartbeat.heartbeat.prompt = prompt.prompt;
-    buddy_state_reduce(&state, &heartbeat, 1003, &action);
+    buddy_state_reduce(&state, &heartbeat, 2002, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(snapshot.prompt_id[0] == '\0');
-    buddy_state_reduce(&state, &approve, 1004, &action);
-    assert(action.type == BUDDY_ACTION_NONE);
+    /* With no prompt on screen, OK pats the buddy instead of answering. */
+    buddy_state_reduce(&state, &approve, 3002, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
 
     heartbeat.heartbeat.prompt = test_prompt_event("req-2", "Read", "README", 0, 1).prompt;
-    buddy_state_reduce(&state, &heartbeat, 1005, &action);
+    buddy_state_reduce(&state, &heartbeat, 3003, &action);
     buddy_state_snapshot(&state, &snapshot);
     assert(!snapshot.approval_locked);
     assert(strcmp(snapshot.prompt_id, "req-2") == 0);
-    buddy_state_reduce(&state, &approve, 1006, &action);
+    buddy_state_reduce(&state, &approve, 4003, &action);
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(strcmp(action.permission.id, "req-2") == 0);
 }
@@ -465,7 +466,8 @@ static void test_absent_prompt_is_ignored(void)
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &approve, 1001, &action);
-    assert(action.type == BUDDY_ACTION_NONE);
+    /* OK with no prompt pats the buddy; no permission is sent. */
+    assert(action.type != BUDDY_ACTION_PERMISSION);
 }
 
 static void test_timeout_stale_prompt_is_ignored(void)
@@ -482,7 +484,8 @@ static void test_timeout_stale_prompt_is_ignored(void)
     buddy_state_reduce(&state, &prompt, 1001, &action);
     buddy_state_reduce(&state, &tick, 31001, &action);
     buddy_state_reduce(&state, &approve, 31002, &action);
-    assert(action.type == BUDDY_ACTION_NONE);
+    /* The stale prompt is gone, so OK pats the buddy; no permission is sent. */
+    assert(action.type != BUDDY_ACTION_PERMISSION);
 }
 
 static void test_standalone_prompt_refreshes_liveness_clock(void)
@@ -494,7 +497,7 @@ static void test_standalone_prompt_refreshes_liveness_clock(void)
 
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 60000, &action);
-    buddy_state_reduce(&state, &approve, 60001, &action);
+    buddy_state_reduce(&state, &approve, 61000, &action);
 
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(strcmp(action.permission.id, "req-late") == 0);
@@ -516,10 +519,10 @@ static void test_disconnect_then_reconnect_does_not_restore_prompt(void)
     buddy_state_reduce(&state, &heartbeat, 1002, &action);
     heartbeat.heartbeat.connected = true;
     buddy_state_reduce(&state, &heartbeat, 1003, &action);
-    buddy_state_reduce(&state, &approve, 1004, &action);
+    buddy_state_reduce(&state, &approve, 2003, &action);
 
     assert(state.prompt.id[0] == '\0');
-    assert(action.type == BUDDY_ACTION_NONE);
+    assert(action.type != BUDDY_ACTION_PERMISSION); /* OK with no prompt pats. */
 }
 
 static void test_mismatched_observed_prompt_is_ignored(void)
@@ -532,7 +535,7 @@ static void test_mismatched_observed_prompt_is_ignored(void)
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
     test_set_observed_prompt_id(&approve, "req-2");
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
 
     assert(action.type == BUDDY_ACTION_NONE);
     assert(strcmp(state.prompt.id, "req-1") == 0);
@@ -549,9 +552,9 @@ static void test_nonterminated_prompt_id_is_ignored(void)
     prompt.prompt.id_length = sizeof(prompt.prompt.id);
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
 
-    assert(action.type == BUDDY_ACTION_NONE);
+    assert(action.type != BUDDY_ACTION_PERMISSION); /* OK with no prompt pats. */
 }
 
 static void test_truncated_prompt_id_is_ignored(void)
@@ -564,9 +567,9 @@ static void test_truncated_prompt_id_is_ignored(void)
     prompt.prompt.id_truncated = true;
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &prompt, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
 
-    assert(action.type == BUDDY_ACTION_NONE);
+    assert(action.type != BUDDY_ACTION_PERMISSION); /* OK with no prompt pats. */
 }
 
 static void test_long_ok_opens_settings(void)
@@ -596,7 +599,7 @@ static void test_original_screen_and_menu_navigation(void)
     buddy_state_reduce(&state, &up, 1, &action);
     assert(state.page == BUDDY_PAGE_PET);
     buddy_state_reduce(&state, &down, 2, &action);
-    assert(state.pet_page == 1);
+    assert(state.care_selection == BUDDY_CARE_PLAY);
     buddy_state_reduce(&state, &up, 3, &action);
     assert(state.page == BUDDY_PAGE_INFO);
     buddy_state_reduce(&state, &down, 4, &action);
@@ -696,7 +699,7 @@ static void test_unpair_confirmation_ok_emits_explicit_action(void)
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &unpair, 1000, &action);
     buddy_state_reduce(&state, &heartbeat, 1001, &action);
-    buddy_state_reduce(&state, &ok, 1002, &action);
+    buddy_state_reduce(&state, &ok, 2001, &action);
 
     assert(!state.confirmation_pending);
     assert(action.type == BUDDY_ACTION_UNPAIR_CONFIRMED);
@@ -732,7 +735,7 @@ static void test_parsed_heartbeat_approval_serializes_permission(void)
     assert(buddy_protocol_parse(json, strlen(json), &heartbeat) == BUDDY_EVENT_HEARTBEAT);
     buddy_state_init(&state, NULL);
     buddy_state_reduce(&state, &heartbeat, 1000, &action);
-    buddy_state_reduce(&state, &approve, 1001, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
 
     assert(action.type == BUDDY_ACTION_PERMISSION);
     assert(buddy_protocol_permission_json(output, sizeof(output), action.permission.id,
@@ -1124,6 +1127,111 @@ static void test_periodic_pet_save(void)
     assert(action.pet == buddy_pet_pack(&state.pet, (uint32_t)TEST_MIDNIGHT + 599U));
 }
 
+static void test_home_ok_pats(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &ok, 1000, &action);
+    assert(state.pet.happiness == 85);
+    assert(state.character == BUDDY_CHARACTER_PAT);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    assert(action.pet == buddy_pet_pack(&state.pet, 0));
+}
+
+static void test_pet_page_cycles_and_feeds(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t up = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_UP};
+    buddy_event_t down = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_DOWN};
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+    buddy_ui_snapshot_t snapshot;
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &up, 1000, &action);
+    assert(state.page == BUDDY_PAGE_PET && state.care_selection == BUDDY_CARE_FEED);
+    buddy_state_reduce(&state, &down, 1000, &action);
+    buddy_state_reduce(&state, &down, 1000, &action);
+    assert(state.care_selection == BUDDY_CARE_PAT);
+    buddy_state_snapshot(&state, &snapshot);
+    assert(snapshot.care_selection == BUDDY_CARE_PAT);
+    buddy_state_reduce(&state, &down, 1000, &action);
+    assert(state.care_selection == BUDDY_CARE_FEED);
+    buddy_state_reduce(&state, &ok, 1000, &action);
+    assert(state.pet.fullness == 100);
+    assert(state.character == BUDDY_CHARACTER_EAT);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    buddy_state_reduce(&state, &down, 1000, &action);
+    buddy_state_reduce(&state, &ok, 1000, &action);
+    assert(state.pet.happiness == 100);
+    assert(state.character == BUDDY_CHARACTER_PLAY);
+}
+
+static void test_feed_refused(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t up = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_UP};
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    state.pet.fullness = 95;
+    buddy_state_reduce(&state, &up, 1000, &action);
+    buddy_state_reduce(&state, &ok, 1000, &action);
+    assert(state.pet.fullness == 95);
+    assert(state.character == BUDDY_CHARACTER_REFUSE);
+    assert(strcmp(state.message, "Not hungry") == 0);
+    buddy_state_reduce(&state, &tick, 3999, &action);
+    assert(state.character == BUDDY_CHARACTER_REFUSE);
+    buddy_state_reduce(&state, &tick, 4000, &action);
+    assert(state.character != BUDDY_CHARACTER_REFUSE);
+}
+
+static void test_pat_burst_dizzy(void)
+{
+    buddy_state_t state;
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+    unsigned i;
+
+    buddy_state_init(&state, NULL);
+    state.pet.happiness = 50;
+    for (i = 0; i < 4U; ++i) {
+        buddy_state_reduce(&state, &ok, 1000U + i * 500U, NULL);
+        assert(state.character == BUDDY_CHARACTER_PAT);
+    }
+    assert(state.pet.happiness == 70);
+    buddy_state_reduce(&state, &ok, 3000, NULL);
+    assert(state.character == BUDDY_CHARACTER_DIZZY);
+    assert(state.pet.happiness == 70);
+    /* The burst history starts over, so the next pat is an ordinary one. */
+    buddy_state_reduce(&state, &ok, 3500, NULL);
+    assert(state.character == BUDDY_CHARACTER_PAT);
+    assert(state.pet.happiness == 75);
+}
+
+static void test_ok_during_guard_is_ignored(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &prompt, 1000, NULL);
+    buddy_state_reduce(&state, &ok, 1999, &action);
+    assert(action.type == BUDDY_ACTION_NONE);
+    assert(state.pet.happiness == 80);
+    assert(!state.approval_locked);
+    buddy_state_reduce(&state, &ok, 2000, &action);
+    assert(action.type == BUDDY_ACTION_PERMISSION);
+}
+
 int main(void)
 {
     test_offline_initialization();
@@ -1137,6 +1245,11 @@ int main(void)
     test_catch_up_once_and_never_negative();
     test_catch_up_capped_at_one_day();
     test_periodic_pet_save();
+    test_home_ok_pats();
+    test_pet_page_cycles_and_feeds();
+    test_feed_refused();
+    test_pat_burst_dizzy();
+    test_ok_during_guard_is_ignored();
     test_heartbeat_mapping();
     test_character_priority();
     test_timeout_clears_prompt();

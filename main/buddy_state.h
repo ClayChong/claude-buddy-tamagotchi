@@ -40,7 +40,7 @@ typedef struct {
     buddy_settings_item_t settings_selection;
     buddy_reset_item_t reset_selection;
     buddy_menu_item_t menu_selection;
-    uint8_t pet_page;
+    buddy_care_t care_selection;
     uint8_t info_page;
     bool menu_open;
     bool reset_open;
@@ -65,6 +65,8 @@ typedef struct {
     uint64_t pet_saved_ms;
     uint32_t pet_saved_epoch;
     bool pet_catch_up_done;
+    uint64_t pat_ms[4];
+    uint8_t pat_count;
 } buddy_state_t;
 
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings);
