@@ -115,6 +115,25 @@ buddy_mood_t buddy_pet_mood(const buddy_pet_t *pet)
     return BUDDY_MOOD_NORMAL;
 }
 
+unsigned buddy_pet_segments(uint8_t value)
+{
+    if (value > BUDDY_PET_MAX) {
+        value = BUDDY_PET_MAX;
+    }
+    return ((unsigned)value * 8U + 50U) / 100U;
+}
+
+const char *buddy_mood_name(buddy_mood_t mood)
+{
+    switch (mood) {
+    case BUDDY_MOOD_HAPPY: return "HAPPY";
+    case BUDDY_MOOD_HUNGRY: return "HUNGRY";
+    case BUDDY_MOOD_TIRED: return "TIRED";
+    case BUDDY_MOOD_SAD: return "SAD";
+    default: return "OK";
+    }
+}
+
 uint64_t buddy_pet_pack(const buddy_pet_t *pet, uint32_t epoch_seconds)
 {
     if (pet == NULL) {

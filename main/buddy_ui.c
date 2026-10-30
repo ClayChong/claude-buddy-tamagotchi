@@ -7,6 +7,7 @@
 #include "buddy_anim.h"
 #include "buddy_i4.h"
 #include "buddy_pack.h"
+#include "buddy_pet.h"
 #include "buddy_sprite.h"
 #include "buddy_text_layout.h"
 #include "esp_random.h"
@@ -190,24 +191,36 @@ static uint8_t art_state(buddy_character_t state)
     case BUDDY_CHARACTER_ATTENTION:
     case BUDDY_CHARACTER_PAIRING:
     case BUDDY_CHARACTER_CONFIRMATION: return 3;
-    case BUDDY_CHARACTER_CELEBRATE: return 4;
-    case BUDDY_CHARACTER_DIZZY: return 5;
-    case BUDDY_CHARACTER_HEART: return 6;
+    case BUDDY_CHARACTER_CELEBRATE:
+    case BUDDY_CHARACTER_PLAY: return 4;
+    case BUDDY_CHARACTER_DIZZY:
+    case BUDDY_CHARACTER_REFUSE: return 5;
+    case BUDDY_CHARACTER_HEART:
+    case BUDDY_CHARACTER_EAT:
+    case BUDDY_CHARACTER_PAT: return 6;
     default: return 1;
     }
 }
 
+/* Packs have their own care states; buddy_pack_resolve_state() falls back
+ * when a pack lacks them. */
 static buddy_pack_state_t pack_state(buddy_character_t state)
 {
-    return (buddy_pack_state_t)art_state(state);
+    switch (state) {
+    case BUDDY_CHARACTER_EAT: return BUDDY_PACK_EAT;
+    case BUDDY_CHARACTER_PLAY: return BUDDY_PACK_PLAY;
+    case BUDDY_CHARACTER_PAT: return BUDDY_PACK_PAT;
+    case BUDDY_CHARACTER_REFUSE: return BUDDY_PACK_REFUSE;
+    default: return (buddy_pack_state_t)art_state(state);
+    }
 }
 
 /* The scheduler only moves with time, so asking twice at the same time gives
  * the same frame. */
 static bool pack_frame(const buddy_ui_snapshot_t *s, uint16_t *frame)
 {
-    return buddy_anim_frame(&s_anim, buddy_pack_info(), pack_state(s->character),
-                            BUDDY_MOOD_NORMAL, s_elapsed_ms, frame);
+    return buddy_anim_frame(&s_anim, buddy_pack_info(), pack_state(s->character), s->mood,
+                            s_elapsed_ms, frame);
 }
 
 static bool showing_pack(const buddy_ui_snapshot_t *s)
@@ -291,40 +304,58 @@ static void draw_home(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
     text(layer, 8, 300, 224, COL_DIM, BUDDY_ACTION_HOME, false, LV_TEXT_ALIGN_CENTER);
 }
 
-static void draw_heart(lv_layer_t *layer, int x, int y, bool on)
+static lv_color_t mood_color(buddy_mood_t mood)
 {
-    lv_color_t c = on ? COL_RED : COL_LINE;
-    box(layer, x + 2, y, 4, 4, c, c, 0, 0);
-    box(layer, x + 8, y, 4, 4, c, c, 0, 0);
-    box(layer, x, y + 3, 14, 5, c, c, 0, 0);
-    box(layer, x + 3, y + 8, 8, 3, c, c, 0, 0);
-    box(layer, x + 6, y + 11, 2, 2, c, c, 0, 0);
+    switch (mood) {
+    case BUDDY_MOOD_HAPPY: return COL_GREEN;
+    case BUDDY_MOOD_HUNGRY: return COL_RED;
+    case BUDDY_MOOD_TIRED: return COL_YELLOW;
+    case BUDDY_MOOD_SAD: return COL_BLUE;
+    default: return COL_INK;
+    }
+}
+
+static void draw_stat_bar(lv_layer_t *layer, int y, const char *label, uint8_t value,
+                          lv_color_t color)
+{
+    unsigned lit = buddy_pet_segments(value);
+    unsigned i;
+    text(layer, 16, y, 75, COL_DIM, label, false, LV_TEXT_ALIGN_LEFT);
+    for (i = 0; i < 8; ++i) {
+        lv_color_t c = i < lit ? color : COL_LINE;
+        box(layer, 93 + (int)i * 16, y, 11, 8, c, c, 0, 1);
+    }
 }
 
 static void draw_pet(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
 {
+    static const char *const care[BUDDY_CARE_COUNT] = {"FEED", "PLAY", "PAT"};
     char value[64];
     unsigned i;
     uint64_t level = s->tokens / 50000ULL;
     text(layer, 9, 35, 222, COL_ORANGE, species_name(s), false, LV_TEXT_ALIGN_CENTER);
     draw_buddy(layer, s, true);
     rule(layer, 12, BUDDY_UI_INFO_Y, 216, COL_LINE);
-    text(layer, 16, 170, 62, COL_DIM, "MOOD", false, LV_TEXT_ALIGN_LEFT);
-    for (i = 0; i < 4; ++i) draw_heart(layer, 84 + (int)i * 25, 168, !s->heartbeat_stale || i < 2);
+    text(layer, 16, 172, 62, COL_DIM, "MOOD", false, LV_TEXT_ALIGN_LEFT);
+    text(layer, 84, 172, 96, mood_color(s->mood), buddy_mood_name(s->mood), false,
+         LV_TEXT_ALIGN_LEFT);
     snprintf(value, sizeof(value), "LV %llu", (unsigned long long)level);
     box(layer, 184, 166, 42, 19, COL_ORANGE, COL_ORANGE, 0, 3);
     text(layer, 186, 171, 38, COL_BG, value, false, LV_TEXT_ALIGN_CENTER);
-    text(layer, 16, 200, 75, COL_DIM, "TOKENS", false, LV_TEXT_ALIGN_LEFT);
+    draw_stat_bar(layer, 190, "FULL", s->pet_fullness, COL_ORANGE);
+    draw_stat_bar(layer, 206, "HAPPY", s->pet_happiness, COL_GREEN);
+    draw_stat_bar(layer, 222, "ENERGY", s->pet_energy, COL_YELLOW);
+    text(layer, 16, 242, 75, COL_DIM, "TOKENS", false, LV_TEXT_ALIGN_LEFT);
     snprintf(value, sizeof(value), "%llu", (unsigned long long)s->tokens);
-    text(layer, 92, 200, 132, COL_INK, value, false, LV_TEXT_ALIGN_RIGHT);
-    text(layer, 16, 222, 75, COL_DIM, "TODAY", false, LV_TEXT_ALIGN_LEFT);
+    text(layer, 92, 242, 132, COL_INK, value, false, LV_TEXT_ALIGN_RIGHT);
+    text(layer, 16, 258, 75, COL_DIM, "TODAY", false, LV_TEXT_ALIGN_LEFT);
     snprintf(value, sizeof(value), "%llu", (unsigned long long)s->tokens_today);
-    text(layer, 92, 222, 132, COL_INK, value, false, LV_TEXT_ALIGN_RIGHT);
-    text(layer, 16, 248, 75, COL_DIM, "ENERGY", false, LV_TEXT_ALIGN_LEFT);
-    for (i = 0; i < 8; ++i) {
-        bool on = !s->heartbeat_stale && i < 6;
-        box(layer, 93 + (int)i * 16, 248, 11, 8, on ? COL_YELLOW : COL_LINE,
-            on ? COL_YELLOW : COL_LINE, 0, 1);
+    text(layer, 92, 258, 132, COL_INK, value, false, LV_TEXT_ALIGN_RIGHT);
+    for (i = 0; i < BUDDY_CARE_COUNT; ++i) {
+        bool on = s->care_selection == (buddy_care_t)i;
+        int x = 16 + (int)i * 72;
+        box(layer, x, 274, 64, 16, on ? COL_ORANGE : COL_BG, on ? COL_ORANGE : COL_LINE, 1, 3);
+        text(layer, x, 278, 64, on ? COL_BG : COL_DIM, care[i], false, LV_TEXT_ALIGN_CENTER);
     }
     text(layer, 8, 300, 224, COL_DIM, BUDDY_ACTION_PET, false, LV_TEXT_ALIGN_CENTER);
 }

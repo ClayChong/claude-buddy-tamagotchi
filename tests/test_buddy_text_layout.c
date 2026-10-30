@@ -24,6 +24,8 @@ int main(void)
     assert(BUDDY_UI_ACTION_Y == 296 && BUDDY_UI_ACTION_H == 24);
     assert(strlen(BUDDY_ACTION_HOME) * 8U <= 224U);
     assert(strlen(BUDDY_ACTION_PET) * 8U <= 224U);
+    assert(strstr(BUDDY_ACTION_HOME, "OK:PAT") != NULL);
+    assert(strstr(BUDDY_ACTION_PET, "OK:DO") != NULL);
     assert(strlen(BUDDY_ACTION_INFO) * 8U <= 224U);
     assert(strlen(BUDDY_ACTION_SETTINGS) * 8U <= 224U);
     assert(strlen(BUDDY_ACTION_CONFIRM) * 8U <= 204U);

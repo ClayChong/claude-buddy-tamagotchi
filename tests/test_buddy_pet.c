@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "buddy_pet.h"
 
@@ -120,6 +121,24 @@ static void test_huge_elapse_clamps(void)
     assert(pet.fullness == 0 && pet.happiness == 0 && pet.energy == 0);
 }
 
+static void test_bar_segments(void)
+{
+    assert(buddy_pet_segments(0) == 0);
+    assert(buddy_pet_segments(6) == 0);
+    assert(buddy_pet_segments(7) == 1);
+    assert(buddy_pet_segments(50) == 4);
+    assert(buddy_pet_segments(100) == 8);
+}
+
+static void test_mood_names(void)
+{
+    assert(strcmp(buddy_mood_name(BUDDY_MOOD_HAPPY), "HAPPY") == 0);
+    assert(strcmp(buddy_mood_name(BUDDY_MOOD_NORMAL), "OK") == 0);
+    assert(strcmp(buddy_mood_name(BUDDY_MOOD_HUNGRY), "HUNGRY") == 0);
+    assert(strcmp(buddy_mood_name(BUDDY_MOOD_TIRED), "TIRED") == 0);
+    assert(strcmp(buddy_mood_name(BUDDY_MOOD_SAD), "SAD") == 0);
+}
+
 int main(void)
 {
     test_init_is_eighty();
@@ -131,5 +150,7 @@ int main(void)
     test_mood_order();
     test_pack_round_trip();
     test_huge_elapse_clamps();
+    test_bar_segments();
+    test_mood_names();
     return 0;
 }

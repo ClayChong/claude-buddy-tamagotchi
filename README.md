@@ -47,9 +47,11 @@ RX、TX 和 TX CCCD 需要加密访问。收发数据是以换行分隔的 UTF-8
 ### 普通页面
 
 - `UP` 短按：按原版顺序循环 Normal、Pet 和 Info。
-- `DOWN` 短按：Normal 中滚动近期消息，Pet 中循环 2 页，Info 中循环 6 页。
+- `DOWN` 短按：Normal 中滚动近期消息，Pet 中在 Feed、Play、Pat 之间切换，Info 中
+  循环 6 页。
+- `OK` 短按：Normal 中摸摸 Buddy（Pat），Pet 中执行选中的照顾动作。
 - `OK` 长按：打开原版浮层菜单；用 `UP`/`DOWN` 选择、`OK` 执行。
-- Normal 显示 Buddy 和近期消息；Pet 显示 token/等级及说明；Info 包含 About、
+- Normal 显示 Buddy 和近期消息；Pet 显示心情、三项状态、token/等级和照顾动作；Info 包含 About、
   Buttons、Claude、Device、Bluetooth 和 Credits 六页。
 
 ### 审批页面
@@ -57,7 +59,8 @@ RX、TX 和 TX CCCD 需要加密访问。收发数据是以换行分隔的 UTF-8
 收到有效审批心跳后会自动切换到审批页，并显示工具名和参数提示。
 
 - `UP` 短按：向上滚动较长的工具参数。
-- `OK` 短按：发送一次性批准（`permission/once`）。
+- `OK` 短按：发送一次性批准（`permission/once`）。审批出现后的第 1 秒内按 `OK`
+  不生效，避免摸 Buddy 时误批准。
 - `DOWN` 短按：发送拒绝（`permission/deny`）。
 
 每个审批 ID 只允许一次决定。发送后页面锁定，并显示 `Sending...`、`Sent` 或
@@ -98,6 +101,30 @@ cmake --build build-host
 ctest --test-dir build-host --output-on-failure
 ```
 
+## 宠物（Tamagotchi）
+
+Buddy 有三项 0–100 的状态，首次启动时都是 80，保存在 NVS 键 `pet` 中。
+
+| 状态 | 随时间变化 | 动作 |
+| --- | --- | --- |
+| 饱食（FULL） | 每 864 秒 -1（约 24 小时吃空） | Feed +30；饱食 ≥ 90 时拒绝进食并显示 `Not hungry` |
+| 快乐（HAPPY） | 每 720 秒 -1；审批等待超过 120 秒后每 120 秒再 -1 | Play +20，Pat +5，批准成功送达 +3 |
+| 精力（ENERGY） | Claude 忙碌时每 300 秒 -1；睡眠时每 120 秒 +1；其余时间每 1800 秒 -1 | 无 |
+
+- 睡眠：未连接、心跳超时，或同步时间后的本地 23:00–06:59。
+- 心情按顺序判断：饱食 < 25 为 HUNGRY，精力 < 20 为 TIRED，快乐 < 25 为 SAD，三项都 ≥ 70
+  为 HAPPY，否则为 OK。宠物不会死亡或生病。
+- 3 秒内连续摸 5 次会头晕（dizzy）3 秒，这一次不加快乐。
+- 每次照顾动作后和每 10 分钟保存一次；设置模块的 60 秒写入节流仍然生效。
+- 关机时间在开机后第一次时间同步时补算为睡眠，最多 24 小时。
+- Factory reset 会把状态恢复为 80/80/80。
+
+**空闲动画**
+
+角色包的 idle 片段 0 是基础片段（通常是眨眼）。每个特殊片段之间播放 1–3 次基础片段，
+特殊片段随机选择且不连续重复。心情为 HUNGRY、TIRED 或 SAD 且角色包有对应片段时，
+每次挑选特殊片段有 50% 概率改播心情片段。状态切换时动画从第一帧开始。
+
 ## 自定义角色上传
 
 设备通过上游的 `char_begin`/`file`/`chunk`/`file_end`/`char_end` 命令接收一个
@@ -109,6 +136,9 @@ ctest --test-dir build-host --output-on-failure
   GIF 解码。
 - 帧为 4-bit 调色板索引，使用 UI 的 16 色，索引 0 透明。
 - 帧宽、高均不超过 120 像素，在舞台区按 1:1 居中显示。
+- 版本 1 有 7 个状态；版本 2 增加 `eat`、`play`、`pat`、`refuse`、`hungry`、`sad`、
+  `tired`，共 14 个。设备两种都能读取。缺少的照顾动作会回退：eat、pat 用 heart，
+  play 用 celebrate，refuse 用 dizzy；缺少的心情片段不播放。
 
 **存储**
 
@@ -131,13 +161,14 @@ ctest --test-dir build-host --output-on-failure
 配套的主机工具 claude-buddy-bridge 提供两个命令：
 
 - `pack_builder.py`：把 PNG 精灵表或上游角色包（`manifest.json` + GIF）转换为 BPK1。
+  只有包含照顾或心情精灵表时才写出版本 2，因此旧角色包仍可用于旧固件。
 - `buddyd.py push`：通过 BLE 上传。
 
 ## 当前限制
 
 - 只保存一个自定义角色。
 - 设备端不解码 GIF；Claude Desktop 拖放的 GIF 角色包需先在主机端转换。
-- 没有 IMU，因此不会触发摇晃或翻面（`dizzy` 状态没有本机触发）。
+- 没有 IMU，因此不会触发摇晃或翻面；`dizzy` 只在连续摸 5 次或审批发送失败时出现。
 - 设备不保存近期消息、工具参数、审批 ID 或会话内容到 Flash。
 
 ## 板级验收清单

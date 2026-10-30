@@ -44,6 +44,10 @@ bool buddy_pet_feed(buddy_pet_t *pet);
 void buddy_pet_play(buddy_pet_t *pet);
 void buddy_pet_pat(buddy_pet_t *pet);
 buddy_mood_t buddy_pet_mood(const buddy_pet_t *pet);
+/* Lit segments of an 8-segment bar for a 0..100 stat. */
+unsigned buddy_pet_segments(uint8_t value);
+/* Upper-case word shown on the pet page. */
+const char *buddy_mood_name(buddy_mood_t mood);
 /* NVS value: epoch_seconds << 32 | energy << 16 | happiness << 8 | fullness. */
 uint64_t buddy_pet_pack(const buddy_pet_t *pet, uint32_t epoch_seconds);
 /* False, leaving pet untouched, when a stat is above 100. */
