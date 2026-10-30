@@ -942,9 +942,115 @@ static void test_new_link_generation_invalidates_sensitive_state_when_disconnect
     assert(!state.confirmation_pending);
 }
 
+/* 2026-01-01 00:00 UTC. */
+#define TEST_MIDNIGHT 1767225600LL
+
+static buddy_event_t test_time_event(int64_t epoch_seconds)
+{
+    buddy_event_t event = {0};
+
+    event.type = BUDDY_EVENT_TIME;
+    event.time.epoch_seconds = epoch_seconds;
+    return event;
+}
+
+static void test_pet_starts_happy_in_snapshot(void)
+{
+    buddy_state_t state;
+    buddy_ui_snapshot_t snapshot;
+
+    buddy_state_init(&state, NULL);
+    buddy_state_snapshot(&state, &snapshot);
+    assert(snapshot.pet_fullness == 80);
+    assert(snapshot.pet_happiness == 80);
+    assert(snapshot.pet_energy == 80);
+    assert(snapshot.mood == BUDDY_MOOD_HAPPY);
+}
+
+static void test_pet_decays_with_ticks(void)
+{
+    buddy_state_t state;
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &tick, 1000 + 7200000, NULL);
+    assert(state.pet.happiness == 70);
+}
+
+static void test_busy_drains_energy(void)
+{
+    buddy_state_t state;
+    buddy_event_t heartbeat = test_heartbeat_event(0, 1);
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &tick, 1000 + 3000000, NULL);
+    assert(state.pet.energy == 70);
+}
+
+static uint8_t test_energy_after_gap(int64_t epoch_seconds)
+{
+    buddy_state_t state;
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t time = test_time_event(epoch_seconds);
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &time, 1000, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000 + 1200000, NULL);
+    return state.pet.energy;
+}
+
+static void test_night_counts_as_sleep(void)
+{
+    assert(test_energy_after_gap(TEST_MIDNIGHT + 23 * 3600 + 30 * 60) == 90);
+    assert(test_energy_after_gap(TEST_MIDNIGHT + 12 * 3600) == 80);
+}
+
+static void test_waiting_prompt_lowers_happiness(void)
+{
+    buddy_state_t state;
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &prompt, 1000, NULL);
+    buddy_state_reduce(&state, &tick, 1000 + 360000, NULL);
+    assert(state.pet.happiness == 77);
+    buddy_state_reduce(&state, &tick, 1000 + 360000, NULL);
+    assert(state.pet.happiness == 77);
+}
+
+static void test_approval_raises_happiness(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t approve = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+    buddy_event_t result = test_permission_result_event("req-1", BUDDY_PERMISSION_ONCE, true);
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &prompt, 1000, &action);
+    buddy_state_reduce(&state, &approve, 2000, &action);
+    assert(action.type == BUDDY_ACTION_PERMISSION);
+    buddy_state_reduce(&state, &result, 2000, &action);
+    assert(state.pet.happiness == 83);
+}
+
 int main(void)
 {
     test_offline_initialization();
+    test_pet_starts_happy_in_snapshot();
+    test_pet_decays_with_ticks();
+    test_busy_drains_energy();
+    test_night_counts_as_sleep();
+    test_waiting_prompt_lowers_happiness();
+    test_approval_raises_happiness();
     test_heartbeat_mapping();
     test_character_priority();
     test_timeout_clears_prompt();

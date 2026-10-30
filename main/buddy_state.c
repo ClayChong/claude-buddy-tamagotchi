@@ -6,6 +6,10 @@
 #define BUDDY_HEART_ANIMATION_MS 5000
 #define BUDDY_CELEBRATION_ANIMATION_MS 1500
 #define BUDDY_HEARTBEAT_TIMEOUT_MS 30000
+#define BUDDY_PROMPT_PENALTY_MS 120000ULL
+#define BUDDY_APPROVAL_HAPPINESS 3
+#define BUDDY_NIGHT_START_HOUR 23
+#define BUDDY_NIGHT_END_HOUR 7
 #define BUDDY_TOKEN_CELEBRATION_STEP 50000
 
 static void buddy_copy(char *destination, size_t destination_size, const char *source)
@@ -320,6 +324,17 @@ static bool buddy_prompt_ids_match(const buddy_prompt_t *left, const buddy_promp
            memcmp(left->id, right->id, left->id_length) == 0;
 }
 
+/* Starts the approval guard and waiting penalty clock for a prompt that is not
+ * already on screen. */
+static void buddy_note_prompt_shown(buddy_state_t *state, const buddy_prompt_t *prompt,
+                                    uint64_t now_ms)
+{
+    if (!buddy_prompt_ids_match(&state->prompt, prompt)) {
+        state->prompt_shown_ms = now_ms;
+        state->prompt_penalties = 0;
+    }
+}
+
 static bool buddy_prompt_was_attempted(const buddy_state_t *state,
                                        const buddy_prompt_t *prompt)
 {
@@ -352,6 +367,7 @@ static void buddy_apply_heartbeat(buddy_state_t *state, const buddy_heartbeat_t 
     } else if (buddy_prompt_was_attempted(state, &heartbeat->prompt)) {
         buddy_invalidate_prompt(state);
     } else {
+        buddy_note_prompt_shown(state, &heartbeat->prompt, now_ms);
         state->prompt = heartbeat->prompt;
         state->prompt_connection_generation = connection_generation;
         state->approval_locked = false;
@@ -389,6 +405,7 @@ static void buddy_apply_prompt(buddy_state_t *state, const buddy_prompt_t *promp
         return;
     }
 
+    buddy_note_prompt_shown(state, prompt, now_ms);
     state->prompt = *prompt;
     state->prompt_connection_generation = connection_generation;
     state->approval_locked = false;
@@ -456,6 +473,10 @@ static void buddy_apply_permission_result(buddy_state_t *state,
         buddy_copy(state->last_successful_decision_id,
                    sizeof(state->last_successful_decision_id), result->id);
         state->permission_delivery = BUDDY_PERMISSION_DELIVERY_SENT;
+        if (result->decision == BUDDY_PERMISSION_ONCE ||
+            result->decision == BUDDY_PERMISSION_ALWAYS) {
+            buddy_pet_add(&state->pet, BUDDY_PET_HAPPINESS, BUDDY_APPROVAL_HAPPINESS);
+        }
         if (result->decision == BUDDY_PERMISSION_ONCE) {
             state->temporary_character = BUDDY_CHARACTER_HEART;
             state->temporary_until_ms = now_ms + BUDDY_HEART_ANIMATION_MS;
@@ -464,6 +485,56 @@ static void buddy_apply_permission_result(buddy_state_t *state,
         state->permission_delivery = BUDDY_PERMISSION_DELIVERY_FAILED;
     }
     buddy_set_ui_refresh(action);
+}
+
+/* Local time from the last sync is 23:00-06:59. */
+static bool buddy_is_night(const buddy_state_t *state, uint64_t now_ms)
+{
+    int64_t local;
+    int64_t hour;
+
+    if (state->epoch_seconds <= 0 || now_ms < state->time_received_ms) {
+        return false;
+    }
+    local = state->epoch_seconds + state->timezone_offset_seconds +
+            (int64_t)((now_ms - state->time_received_ms) / 1000U);
+    hour = ((local % 86400) + 86400) % 86400 / 3600;
+    return hour >= BUDDY_NIGHT_START_HOUR || hour < BUDDY_NIGHT_END_HOUR;
+}
+
+static buddy_pet_activity_t buddy_pet_activity(const buddy_state_t *state, uint64_t now_ms)
+{
+    if (!state->connected || state->heartbeat_stale || buddy_is_night(state, now_ms)) {
+        return BUDDY_PET_SLEEPING;
+    }
+    return state->running > 0 ? BUDDY_PET_BUSY : BUDDY_PET_AWAKE;
+}
+
+/* Runs before the event, so the time since the last event counts with the
+ * activity the pet had during it. */
+static void buddy_update_pet(buddy_state_t *state, uint64_t now_ms)
+{
+    uint64_t seconds;
+
+    if (now_ms < state->pet_updated_ms) {
+        state->pet_updated_ms = now_ms;
+    }
+    seconds = (now_ms - state->pet_updated_ms) / 1000U;
+    if (seconds > 0) {
+        state->pet_updated_ms += seconds * 1000U;
+        buddy_pet_elapse(&state->pet, seconds > UINT32_MAX ? UINT32_MAX : (uint32_t)seconds,
+                         buddy_pet_activity(state, now_ms));
+    }
+    if (buddy_has_actionable_prompt(state) && now_ms >= state->prompt_shown_ms) {
+        uint64_t due = (now_ms - state->prompt_shown_ms) / BUDDY_PROMPT_PENALTY_MS;
+
+        if (due > state->prompt_penalties) {
+            uint64_t missed = due - state->prompt_penalties;
+
+            buddy_pet_add(&state->pet, BUDDY_PET_HAPPINESS, missed > 100U ? -100 : -(int)missed);
+            state->prompt_penalties = due > UINT32_MAX ? UINT32_MAX : (uint32_t)due;
+        }
+    }
 }
 
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings)
@@ -478,6 +549,7 @@ void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *set
     state->heartbeat_stale = true;
     state->brightness_level = 4;
     state->transcript_enabled = true;
+    buddy_pet_init(&state->pet);
     if (settings != NULL) {
         state->settings = *settings;
         state->highest_celebrated_level = settings->highest_celebrated_level;
@@ -497,6 +569,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         return;
     }
 
+    buddy_update_pet(state, now_ms);
     buddy_clear_stale_prompt(state, now_ms);
 
     switch (event->type) {
@@ -716,6 +789,10 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     snapshot->passkey = state->passkey;
     snapshot->battery_percent = state->battery_percent;
     snapshot->battery_mv = state->battery_mv;
+    snapshot->pet_fullness = state->pet.fullness;
+    snapshot->pet_happiness = state->pet.happiness;
+    snapshot->pet_energy = state->pet.energy;
+    snapshot->mood = buddy_pet_mood(&state->pet);
     buddy_copy(snapshot->name, sizeof(snapshot->name), state->name);
     buddy_copy(snapshot->owner, sizeof(snapshot->owner), state->owner);
     buddy_copy(snapshot->time, sizeof(snapshot->time), state->time);

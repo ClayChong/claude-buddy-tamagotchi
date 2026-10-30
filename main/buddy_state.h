@@ -1,5 +1,6 @@
 #pragma once
 
+#include "buddy_pet.h"
 #include "buddy_types.h"
 
 typedef struct {
@@ -57,6 +58,10 @@ typedef struct {
     uint32_t passkey;
     uint8_t battery_percent;
     uint16_t battery_mv;
+    buddy_pet_t pet;
+    uint64_t pet_updated_ms;
+    uint64_t prompt_shown_ms;
+    uint32_t prompt_penalties;
 } buddy_state_t;
 
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings);

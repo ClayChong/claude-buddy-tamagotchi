@@ -293,4 +293,8 @@ typedef struct {
     uint32_t passkey;
     uint8_t battery_percent;
     uint16_t battery_mv;
+    uint8_t pet_fullness;
+    uint8_t pet_happiness;
+    uint8_t pet_energy;
+    buddy_mood_t mood;
 } buddy_ui_snapshot_t;
