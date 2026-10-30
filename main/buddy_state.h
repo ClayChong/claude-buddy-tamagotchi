@@ -47,6 +47,7 @@ typedef struct {
     bool screen_off;
     uint8_t brightness_level;
     uint8_t species;
+    bool pack_available;
     buddy_permission_delivery_t permission_delivery;
     bool approval_locked;
     bool ble_connected;
@@ -62,3 +63,5 @@ void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *set
 void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
                         uint64_t now_ms, buddy_action_t *action);
 void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snapshot);
+/* Records whether an uploaded character is installed; select switches to it. */
+void buddy_state_set_pack(buddy_state_t *state, bool available, bool select);

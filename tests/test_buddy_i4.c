@@ -36,6 +36,21 @@ int main(void)
     }
     buddy_i4_line(&surface, &clip, -20, 2, 20, 2, 9);
     for (x = 2; x < 6; ++x) assert(buddy_i4_get_pixel(pixels, 8, x, 2) == 9);
+
+    /* Blit: 4x2 image, index 0 transparent, clipped to the same rectangle. */
+    {
+        static const uint8_t image[] = {0x12, 0x03, 0x45, 0x60};
+        memset(pixels, 0, 16);
+        buddy_i4_fill_rect(&surface, NULL, 0, 0, 8, 4, 15);
+        buddy_i4_blit(&surface, &clip, image, 4, 2, 1, 1);
+        assert(buddy_i4_get_pixel(pixels, 8, 1, 1) == 15); /* left of clip */
+        assert(buddy_i4_get_pixel(pixels, 8, 2, 1) == 2);
+        assert(buddy_i4_get_pixel(pixels, 8, 3, 1) == 15); /* transparent */
+        assert(buddy_i4_get_pixel(pixels, 8, 4, 1) == 3);
+        assert(buddy_i4_get_pixel(pixels, 8, 2, 2) == 5);
+        assert(buddy_i4_get_pixel(pixels, 8, 3, 2) == 6);
+        assert(buddy_i4_get_pixel(pixels, 8, 4, 2) == 15); /* transparent */
+    }
     assert(guarded[0] == 0xa5 && guarded[17] == 0xa5);
     return 0;
 }

@@ -183,6 +183,12 @@ static void buddy_settings_click(buddy_state_t *state, buddy_key_t key,
             } else if (state->reset_selection == BUDDY_RESET_BACK) {
                 state->reset_open = false;
                 buddy_set_ui_refresh(action);
+            } else if (state->pack_available) {
+                buddy_state_set_pack(state, false, false);
+                buddy_copy(state->message, sizeof(state->message), "Character deleted");
+                if (action != NULL) {
+                    action->type = BUDDY_ACTION_DELETE_CHARACTER;
+                }
             } else {
                 buddy_copy(state->message, sizeof(state->message), "No custom character installed");
                 buddy_set_ui_refresh(action);
@@ -223,7 +229,9 @@ static void buddy_settings_click(buddy_state_t *state, buddy_key_t key,
         buddy_set_ui_refresh(action);
         break;
     case BUDDY_SETTINGS_ASCII_PET:
-        state->species = (uint8_t)((state->species + 1U) % 18U);
+        state->species = (uint8_t)((state->species + 1U) %
+                                   (state->pack_available ? BUDDY_SPECIES_BUILTIN_COUNT + 1U
+                                                          : BUDDY_SPECIES_BUILTIN_COUNT));
         buddy_set_ui_refresh(action);
         break;
     case BUDDY_SETTINGS_BLE:
@@ -694,6 +702,7 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     snapshot->brightness_level = state->brightness_level;
     snapshot->screen_off = state->screen_off;
     snapshot->species = state->species;
+    snapshot->pack_available = state->pack_available;
     snapshot->approval_locked = state->approval_locked;
     snapshot->permission_delivery = state->permission_delivery;
     snapshot->ble_connected = state->ble_connected;
@@ -715,4 +724,17 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     buddy_copy(snapshot->prompt_id, sizeof(snapshot->prompt_id), state->prompt.id);
     buddy_copy(snapshot->prompt_tool, sizeof(snapshot->prompt_tool), state->prompt.tool);
     buddy_copy(snapshot->prompt_hint, sizeof(snapshot->prompt_hint), state->prompt.hint);
+}
+
+void buddy_state_set_pack(buddy_state_t *state, bool available, bool select)
+{
+    if (state == NULL) {
+        return;
+    }
+    state->pack_available = available;
+    if (available && select) {
+        state->species = BUDDY_SPECIES_PACK;
+    } else if (!available && state->species >= BUDDY_SPECIES_BUILTIN_COUNT) {
+        state->species = 0;
+    }
 }

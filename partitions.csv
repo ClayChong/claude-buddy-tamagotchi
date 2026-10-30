@@ -1,0 +1,9 @@
+# nvs, phy_init and factory keep the offsets and sizes of the stock
+# "single app large" table, so flashing this layout keeps NVS (settings and
+# BLE bonds). "buddy" stores one uploaded character pack (BPK1); it ends
+# below 4MB so the image still fits boards with 4MB flash.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x177000,
+buddy,    data, 0x40,    0x190000, 0x100000,

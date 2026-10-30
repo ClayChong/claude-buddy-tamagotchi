@@ -14,6 +14,9 @@
 #define BUDDY_COMMAND_MAX 32
 #define BUDDY_HINT_MAX 320
 #define BUDDY_JSON_LINE_MAX 4096
+/* Species 0-17 are the built-in pixel pets; 18 is an uploaded character pack. */
+#define BUDDY_SPECIES_BUILTIN_COUNT 18U
+#define BUDDY_SPECIES_PACK BUDDY_SPECIES_BUILTIN_COUNT
 
 typedef enum {
     BUDDY_CONNECTION_OFFLINE,
@@ -122,6 +125,7 @@ typedef enum {
     BUDDY_ACTION_UI_SCROLL,
     BUDDY_ACTION_DISPLAY_BACKLIGHT,
     BUDDY_ACTION_SCREEN_OFF,
+    BUDDY_ACTION_DELETE_CHARACTER,
 } buddy_action_type_t;
 
 typedef enum {
@@ -268,6 +272,7 @@ typedef struct {
     bool screen_off;
     uint8_t brightness_level;
     uint8_t species;
+    bool pack_available;
     bool approval_locked;
     buddy_permission_delivery_t permission_delivery;
     bool ble_connected;

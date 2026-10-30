@@ -39,12 +39,55 @@ static esp_err_t buddy_orchestrator_send_ack(const buddy_orchestrator_ops_t *ops
     return buddy_orchestrator_send_json(ops, json, length, generation);
 }
 
+static bool buddy_orchestrator_transfer(buddy_state_t *state,
+                                        const buddy_orchestrator_ops_t *ops,
+                                        const buddy_transfer_t *transfer, bool parsed,
+                                        uint32_t connection_generation,
+                                        buddy_action_t *action)
+{
+    char json[BUDDY_PROTOCOL_TX_MAX];
+    const char *error = NULL;
+    uint32_t n = 0;
+    bool ok;
+    int length;
+
+    if (!parsed) {
+        ok = false;
+        error = "invalid request";
+    } else if (ops->transfer == NULL) {
+        ok = false;
+        error = "unavailable";
+    } else {
+        ok = ops->transfer(ops->context, transfer, &n, &error);
+    }
+    if (ok && transfer->command == BUDDY_TRANSFER_CHAR_END) {
+        /* Like upstream, a freshly installed character is shown right away. */
+        buddy_state_set_pack(state, true, true);
+        if (action != NULL) {
+            action->type = BUDDY_ACTION_UI_REFRESH;
+        }
+    } else if (ok && transfer->command == BUDDY_TRANSFER_CHAR_BEGIN) {
+        /* An accepted char_begin erases the old pack; a rejected one leaves it. */
+        buddy_state_set_pack(state, false, false);
+        if (action != NULL) {
+            action->type = BUDDY_ACTION_UI_REFRESH;
+        }
+    }
+    length = buddy_protocol_transfer_ack_json(json, sizeof(json),
+                                              buddy_transfer_command_name(transfer->command),
+                                              ok, n, ok ? NULL : (error != NULL ? error : "failed"));
+    return buddy_orchestrator_send_json(ops, json, length, connection_generation) == ESP_OK && ok;
+}
+
 bool buddy_orchestrator_process_rx(buddy_state_t *state,
                                    const buddy_orchestrator_ops_t *ops,
                                    const char *json, size_t length,
                                    uint32_t connection_generation,
                                    uint64_t now_ms, buddy_action_t *action)
 {
+    /* Holds a decoded chunk (~3 KB); static keeps it off the app task stack.
+     * Only the app task calls this function. */
+    static buddy_transfer_t transfer;
     buddy_event_t event;
     esp_err_t err = ESP_OK;
     bool setting_command = false;
@@ -53,6 +96,11 @@ bool buddy_orchestrator_process_rx(buddy_state_t *state,
     if (state == NULL || ops == NULL || ops->generation_secure == NULL ||
         !ops->generation_secure(ops->context, connection_generation)) {
         return false;
+    }
+    parsed = buddy_protocol_parse_transfer(json, length, &transfer);
+    if (parsed != BUDDY_TRANSFER_NONE) {
+        return buddy_orchestrator_transfer(state, ops, &transfer, parsed == BUDDY_TRANSFER_PARSED,
+                                           connection_generation, action);
     }
     parsed = buddy_protocol_parse(json, length, &event);
     if (parsed < BUDDY_EVENT_NONE) {
@@ -167,6 +215,8 @@ bool buddy_orchestrator_execute_action(buddy_state_t *state,
     case BUDDY_ACTION_BLE_TOGGLE:
         return ops->set_ble_enabled != NULL &&
                ops->set_ble_enabled(ops->context, action->ble_enabled) == ESP_OK;
+    case BUDDY_ACTION_DELETE_CHARACTER:
+        return ops->delete_pack != NULL && ops->delete_pack(ops->context) == ESP_OK;
     case BUDDY_ACTION_NONE:
     case BUDDY_ACTION_UI_REFRESH:
     case BUDDY_ACTION_UI_SCROLL:

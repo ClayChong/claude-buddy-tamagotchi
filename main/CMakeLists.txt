@@ -13,8 +13,11 @@ idf_component_register(
         "buddy_i4.c"
         "buddy_sprite.c"
         "buddy_text_layout.c"
+        "buddy_pack.c"
+        "buddy_pack_format.c"
+        "buddy_pack_xfer.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp bt esp_hw_support esp_timer json nvs_flash
+    REQUIRES bsp bt esp_hw_support esp_partition esp_timer json nvs_flash
 )
 
 # ESP-IDF 5.5.3 only applies WRITE_ENC to generated CCCDs. Wrap the private

@@ -1,6 +1,7 @@
 #include "buddy_protocol.h"
 
 #include <inttypes.h>
+#include <stddef.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -641,6 +642,192 @@ int buddy_protocol_command_ack_json(char *json, size_t size, const char *command
     }
     buddy_writer_literal(&writer, "}\n");
     return buddy_writer_finish(&writer);
+}
+
+int buddy_protocol_transfer_ack_json(char *json, size_t size, const char *command, bool ok,
+                                     uint32_t n, const char *error)
+{
+    buddy_json_writer_t writer;
+    size_t command_length = buddy_bounded_length(command, BUDDY_COMMAND_MAX);
+    size_t error_length = buddy_bounded_length(error, BUDDY_MESSAGE_MAX);
+
+    if (command == NULL || command_length == 0 || command_length == BUDDY_COMMAND_MAX ||
+        !buddy_utf8_valid(command, command_length) ||
+        (!ok && (error == NULL || error_length == 0 || error_length == BUDDY_MESSAGE_MAX ||
+                 !buddy_utf8_valid(error, error_length)))) {
+        return 0;
+    }
+    buddy_writer_init(&writer, json, size);
+    buddy_writer_literal(&writer, "{\"ack\":");
+    buddy_writer_json_string(&writer, command, command_length);
+    buddy_writer_literal(&writer, ",\"ok\":");
+    buddy_writer_bool(&writer, ok);
+    buddy_writer_literal(&writer, ",\"n\":");
+    buddy_writer_u64(&writer, n);
+    if (!ok) {
+        buddy_writer_literal(&writer, ",\"error\":");
+        buddy_writer_json_string(&writer, error, error_length);
+    }
+    buddy_writer_literal(&writer, "}\n");
+    return buddy_writer_finish(&writer);
+}
+
+static int buddy_base64_value(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+bool buddy_protocol_base64_decode(const char *input, size_t length, uint8_t *output,
+                                  size_t capacity, size_t *decoded)
+{
+    size_t index;
+    size_t out = 0;
+
+    if (input == NULL || output == NULL || decoded == NULL || length % 4U != 0U) {
+        return false;
+    }
+    for (index = 0; index < length; index += 4U) {
+        int v[4];
+        unsigned pad = 0;
+        unsigned k;
+
+        for (k = 0; k < 4U; ++k) {
+            char c = input[index + k];
+
+            if (c == '=' && index + 4U == length && k >= 2U) {
+                v[k] = 0;
+                ++pad;
+            } else if (pad != 0U || (v[k] = buddy_base64_value(c)) < 0) {
+                return false;
+            }
+        }
+        if (out + 3U - pad > capacity) {
+            return false;
+        }
+        output[out++] = (uint8_t)((v[0] << 2) | (v[1] >> 4));
+        if (pad < 2U) output[out++] = (uint8_t)(((v[1] & 0x0f) << 4) | (v[2] >> 2));
+        if (pad < 1U) output[out++] = (uint8_t)(((v[2] & 0x03) << 6) | v[3]);
+    }
+    *decoded = out;
+    return true;
+}
+
+static bool buddy_contains_text(const char *data, size_t length, const char *needle)
+{
+    size_t needle_length = strlen(needle);
+    size_t index;
+
+    for (index = 0; index + needle_length <= length; ++index) {
+        if (memcmp(data + index, needle, needle_length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool buddy_transfer_command(const char *command, buddy_transfer_command_t *value)
+{
+    static const struct {
+        const char *name;
+        buddy_transfer_command_t command;
+    } commands[] = {
+        {"char_begin", BUDDY_TRANSFER_CHAR_BEGIN}, {"file", BUDDY_TRANSFER_FILE},
+        {"chunk", BUDDY_TRANSFER_CHUNK},           {"file_end", BUDDY_TRANSFER_FILE_END},
+        {"char_end", BUDDY_TRANSFER_CHAR_END},
+    };
+    size_t index;
+
+    for (index = 0; index < sizeof(commands) / sizeof(commands[0]); ++index) {
+        if (strcmp(command, commands[index].name) == 0) {
+            *value = commands[index].command;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool buddy_transfer_u32(const cJSON *root, const char *name, uint32_t *value)
+{
+    uint64_t parsed = 0;
+
+    if (!buddy_json_required_u64(root, name, &parsed) || parsed > UINT32_MAX) {
+        return false;
+    }
+    *value = (uint32_t)parsed;
+    return true;
+}
+
+static bool buddy_transfer_string(const cJSON *root, const char *name, char *destination,
+                                  size_t size)
+{
+    const char *value = NULL;
+    size_t length = 0;
+
+    return buddy_json_optional_string(root, name, &value, &length) && value != NULL &&
+           length > 0U && length < size &&
+           buddy_copy_utf8(destination, size, value, length, NULL);
+}
+
+int buddy_protocol_parse_transfer(const char *json, size_t length, buddy_transfer_t *transfer)
+{
+    cJSON *root;
+    const char *end = NULL;
+    const char *command = NULL;
+    size_t command_length = 0;
+    bool ok = false;
+
+    /* Heartbeats have no "cmd"; skip a second full parse for them. */
+    if (transfer == NULL || json == NULL || length > BUDDY_JSON_LINE_MAX ||
+        !buddy_contains_text(json, length, "\"cmd\"") ||
+        !buddy_utf8_valid(json, length) || !buddy_json_raw_controls_valid(json, length) ||
+        !buddy_json_depth_valid(json, length) || buddy_json_contains_nul_escape(json, length)) {
+        return BUDDY_TRANSFER_NONE;
+    }
+    root = cJSON_ParseWithLengthOpts(json, length, &end, 0);
+    if (root == NULL || end != json + length || !cJSON_IsObject(root) ||
+        !buddy_json_optional_string(root, "cmd", &command, &command_length) ||
+        command == NULL || command_length >= BUDDY_COMMAND_MAX) {
+        cJSON_Delete(root);
+        return BUDDY_TRANSFER_NONE;
+    }
+    memset(transfer, 0, offsetof(buddy_transfer_t, data));
+    transfer->data_length = 0;
+    if (!buddy_transfer_command(command, &transfer->command)) {
+        cJSON_Delete(root);
+        return BUDDY_TRANSFER_NONE;
+    }
+    switch (transfer->command) {
+    case BUDDY_TRANSFER_CHAR_BEGIN:
+        ok = buddy_transfer_u32(root, "total", &transfer->total);
+        if (ok && cJSON_GetObjectItemCaseSensitive(root, "name") != NULL) {
+            ok = buddy_transfer_string(root, "name", transfer->name, sizeof(transfer->name));
+        }
+        break;
+    case BUDDY_TRANSFER_FILE:
+        ok = buddy_transfer_string(root, "path", transfer->path, sizeof(transfer->path)) &&
+             buddy_transfer_u32(root, "size", &transfer->size);
+        break;
+    case BUDDY_TRANSFER_CHUNK: {
+        const char *data = NULL;
+        size_t data_length = 0;
+
+        ok = buddy_json_optional_string(root, "d", &data, &data_length) && data != NULL &&
+             buddy_protocol_base64_decode(data, data_length, transfer->data,
+                                          sizeof(transfer->data), &transfer->data_length);
+        break;
+    }
+    case BUDDY_TRANSFER_FILE_END:
+    case BUDDY_TRANSFER_CHAR_END:
+        ok = true;
+        break;
+    }
+    cJSON_Delete(root);
+    return ok ? BUDDY_TRANSFER_PARSED : BUDDY_TRANSFER_MALFORMED;
 }
 
 int buddy_protocol_device_status_json(char *json, size_t size,

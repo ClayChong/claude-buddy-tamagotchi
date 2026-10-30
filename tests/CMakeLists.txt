@@ -52,7 +52,8 @@ add_test(NAME buddy_app_logic COMMAND test_buddy_app_logic)
 
 add_executable(test_buddy_orchestrator test_buddy_orchestrator.c
                ../main/buddy_orchestrator.c ../main/buddy_state.c
-               ../main/buddy_protocol.c ${BUDDY_CJSON_SOURCE})
+               ../main/buddy_protocol.c ../main/buddy_pack_xfer.c
+               ../main/buddy_pack_format.c ${BUDDY_CJSON_SOURCE})
 target_include_directories(test_buddy_orchestrator PRIVATE test_shims ../main
                            ${BUDDY_CJSON_DIR})
 target_compile_options(test_buddy_orchestrator PRIVATE -Wall -Wextra -Werror)
@@ -73,3 +74,10 @@ add_executable(test_buddy_text_layout test_buddy_text_layout.c
 target_include_directories(test_buddy_text_layout PRIVATE ../main)
 target_compile_options(test_buddy_text_layout PRIVATE -Wall -Wextra -Werror)
 add_test(NAME buddy_text_layout COMMAND test_buddy_text_layout)
+
+add_executable(test_buddy_pack test_buddy_pack.c ../main/buddy_pack_format.c
+               ../main/buddy_pack_xfer.c ../main/buddy_orchestrator.c
+               ../main/buddy_state.c ../main/buddy_protocol.c ${BUDDY_CJSON_SOURCE})
+target_include_directories(test_buddy_pack PRIVATE test_shims ../main ${BUDDY_CJSON_DIR})
+target_compile_options(test_buddy_pack PRIVATE -Wall -Wextra -Werror)
+add_test(NAME buddy_pack COMMAND test_buddy_pack)

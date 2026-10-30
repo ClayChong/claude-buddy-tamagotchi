@@ -4,3 +4,6 @@ sdkconfig.old
 managed_components/
 dependencies.lock
 .vscode/
+backup/
+build/
+build-host/

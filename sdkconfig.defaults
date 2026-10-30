@@ -9,7 +9,9 @@ CONFIG_IDF_TARGET="esp32c3"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 # 烧录时按实际探测容量回写镜像头,进一步保证兼容。
 CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Stock single-app-large layout plus a 1MB "buddy" partition for uploaded characters.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # --- 控制台:USB-Serial-JTAG(C3 原生 USB,GPIO18/19)---
 # 不用 UART0:其默认 TX=GPIO21 与本板背光引脚冲突。

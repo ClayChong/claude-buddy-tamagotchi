@@ -72,6 +72,8 @@ RX、TX 和 TX CCCD 需要加密访问。收发数据是以换行分隔的 UTF-8
   显示为 `n/a`，选择时只提示不可用，不会伪造状态。
 - `Unpair`：确认页中 `OK` 删除 BLE bonds 并取消配对，`DOWN` 取消。
 - `Factory reset`：确认页中 `OK` 清除应用设置和统计，`DOWN` 取消。
+- `Buddy`：在 18 种内置 Buddy 之间循环；已上传自定义角色时，第 19 项为该角色。
+- `Delete character`：删除已上传的自定义角色，并切回内置 Buddy。
 
 ## 构建、烧录与监视
 
@@ -96,12 +98,47 @@ cmake --build build-host
 ctest --test-dir build-host --output-on-failure
 ```
 
-## 第一阶段限制
+## 自定义角色上传
 
-当前交付内置 18 种程序化像素 Buddy 和七种动画状态；没有 GIF 解码、LittleFS
-角色包、角色文件推送、`char_begin`/`file`/`chunk`/`file_end`/`char_end`
-传输，也没有 IMU 摇晃或翻面触发。设备不保存近期消息、工具参数、审批 ID 或会话
-内容到 Flash。文件传输命令会返回明确的不支持错误，不会创建半成品文件。
+设备通过上游的 `char_begin`/`file`/`chunk`/`file_end`/`char_end` 命令接收一个
+自定义角色。
+
+**格式**
+
+- 角色在主机端预先转换为 BPK1 格式（见 `main/buddy_pack_format.h`），设备不做
+  GIF 解码。
+- 帧为 4-bit 调色板索引，使用 UI 的 16 色，索引 0 透明。
+- 帧宽、高均不超过 120 像素，在舞台区按 1:1 居中显示。
+
+**存储**
+
+- 角色存放在 `partitions.csv` 中的 1 MB `buddy` 数据分区（子类型 0x40）。
+- `nvs`、`phy_init`、`factory` 的偏移与大小和原 single-app-large 分区表相同，
+  因此 `idf.py flash` 不会清除设置和 BLE bonds。
+
+**传输规则**
+
+- 只接受名为 `pack.bin` 的单个文件。其他文件（例如 Claude Desktop 拖放的
+  GIF）会被拒绝，并提示先在主机端转换。
+- `char_begin` 先擦除旧角色的首扇区；之后边写边按扇区擦除。
+- `char_end` 校验头部和数据的 CRC-32，通过后才显示新角色。传输中断、断开或
+  校验失败时不会留下可加载的半成品。
+- 上传成功后自动切换到新角色。
+- 静态内存增加约 4.3 KB，主要是 3 KB 的分块缓冲。
+
+**主机工具**
+
+配套的主机工具 claude-buddy-bridge 提供两个命令：
+
+- `pack_builder.py`：把 PNG 精灵表或上游角色包（`manifest.json` + GIF）转换为 BPK1。
+- `buddyd.py push`：通过 BLE 上传。
+
+## 当前限制
+
+- 只保存一个自定义角色。
+- 设备端不解码 GIF；Claude Desktop 拖放的 GIF 角色包需先在主机端转换。
+- 没有 IMU，因此不会触发摇晃或翻面（`dizzy` 状态没有本机触发）。
+- 设备不保存近期消息、工具参数、审批 ID 或会话内容到 Flash。
 
 ## 板级验收清单
 
@@ -126,7 +163,9 @@ ctest --test-dir build-host --output-on-failure
 ```text
 components/bsp/     FoloToy AI Passport 板级驱动和公开接口
 main/               Claude Buddy 应用、BLE、协议、状态、设置和 LVGL UI
-tests/              无硬件的协议、状态、BLE 和应用逻辑测试
+main/buddy_pack*    自定义角色格式、上传状态机和 Flash 存储
+tests/              无硬件的协议、状态、BLE、角色上传和应用逻辑测试
+partitions.csv      分区表（含 1 MB buddy 角色分区）
 sdkconfig.defaults  ESP32-C3、LVGL 和应用默认配置
 ```
 

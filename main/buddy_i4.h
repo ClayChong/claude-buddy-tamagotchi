@@ -25,3 +25,7 @@ void buddy_i4_fill_rect(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip
                         int x, int y, int width, int height, uint8_t color_index);
 void buddy_i4_line(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip,
                    int x1, int y1, int x2, int y2, uint8_t color_index);
+/* Draws a packed 4-bit image (row-major, high nibble = left pixel, width
+ * even). Index 0 is transparent. */
+void buddy_i4_blit(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip,
+                   const uint8_t *image, int width, int height, int x, int y);

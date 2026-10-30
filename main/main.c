@@ -22,6 +22,7 @@
 #include "buddy_app_logic.h"
 #include "buddy_ble.h"
 #include "buddy_orchestrator.h"
+#include "buddy_pack.h"
 #include "buddy_protocol.h"
 #include "buddy_settings.h"
 #include "buddy_state.h"
@@ -506,6 +507,8 @@ static bool buddy_control_to_event(const buddy_control_event_t *control,
         event->type = BUDDY_EVENT_BLE_DISCONNECTED;
         event->ble.status = control->data.ble.status;
         event->ble.connection_generation = control->data.ble.connection_generation;
+        /* An upload cannot resume on a new connection; the host restarts it. */
+        buddy_pack_abort();
         break;
     case BUDDY_CONTROL_BLE_PASSKEY:
         event->type = BUDDY_EVENT_BLE_PASSKEY;
@@ -563,6 +566,7 @@ static void buddy_reset_transient_state(buddy_state_t *state, const char *messag
         buddy_default_name(settings.name);
     }
     buddy_state_init(state, &settings);
+    buddy_state_set_pack(state, buddy_pack_available(), true);
     state->battery_available = battery_available;
     state->battery_percent = battery_percent;
     state->battery_mv = battery_mv;
@@ -673,6 +677,7 @@ static esp_err_t buddy_factory_reset(buddy_state_t *state)
         return ESP_FAIL;
     }
     buddy_state_init(state, &defaults);
+    buddy_state_set_pack(state, buddy_pack_available(), true);
     buddy_sample_battery(state);
     buddy_copy_text(state->message, sizeof(state->message), "Factory reset complete");
     if (!atomic_load(&s_ble_initialized)) {
@@ -766,6 +771,19 @@ static esp_err_t buddy_orchestrator_persist_level(void *context, uint64_t level)
     return buddy_settings_set_highest_celebrated_level(level);
 }
 
+static bool buddy_orchestrator_transfer(void *context, const buddy_transfer_t *transfer,
+                                        uint32_t *n, const char **error)
+{
+    (void)context;
+    return buddy_pack_transfer(transfer, n, error);
+}
+
+static esp_err_t buddy_orchestrator_delete_pack(void *context)
+{
+    (void)context;
+    return buddy_pack_delete() ? ESP_OK : ESP_FAIL;
+}
+
 static buddy_orchestrator_ops_t buddy_orchestrator_ops(buddy_state_t *state)
 {
     const buddy_orchestrator_ops_t ops = {
@@ -780,6 +798,8 @@ static buddy_orchestrator_ops_t buddy_orchestrator_ops(buddy_state_t *state)
         .factory_reset = buddy_orchestrator_factory_reset,
         .set_ble_enabled = buddy_orchestrator_set_ble,
         .persist_level = buddy_orchestrator_persist_level,
+        .transfer = buddy_orchestrator_transfer,
+        .delete_pack = buddy_orchestrator_delete_pack,
     };
     return ops;
 }
@@ -935,6 +955,8 @@ static void buddy_app_task(void *context)
     (void)context;
     (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     buddy_state_init(&state, &s_initial_settings);
+    (void)buddy_pack_init();
+    buddy_state_set_pack(&state, buddy_pack_available(), true);
     buddy_sample_battery(&state);
 
     for (;;) {

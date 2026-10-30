@@ -23,6 +23,10 @@ typedef struct {
     esp_err_t (*factory_reset)(void *context);
     esp_err_t (*set_ble_enabled)(void *context, bool enabled);
     esp_err_t (*persist_level)(void *context, uint64_t level);
+    /* Character upload; see buddy_pack_xfer.h. */
+    bool (*transfer)(void *context, const buddy_transfer_t *transfer, uint32_t *n,
+                     const char **error);
+    esp_err_t (*delete_pack)(void *context);
 } buddy_orchestrator_ops_t;
 
 bool buddy_orchestrator_process_rx(buddy_state_t *state,

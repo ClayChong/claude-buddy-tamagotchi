@@ -76,6 +76,21 @@ void buddy_i4_fill_rect(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip
         for (px = left; px < right; ++px) surface_pixel(surface, NULL, px, py, color_index);
 }
 
+void buddy_i4_blit(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip,
+                   const uint8_t *image, int width, int height, int x, int y)
+{
+    int row;
+    int column;
+    if (surface == NULL || image == NULL || width <= 0 || height <= 0 || (width & 1) != 0) return;
+    for (row = 0; row < height; ++row) {
+        const uint8_t *line = image + (size_t)row * ((size_t)width / 2U);
+        for (column = 0; column < width; ++column) {
+            uint8_t index = (column & 1) ? (line[column / 2] & 0x0fU) : (line[column / 2] >> 4);
+            if (index != 0U) surface_pixel(surface, clip, x + column, y + row, index);
+        }
+    }
+}
+
 void buddy_i4_line(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip,
                    int x1, int y1, int x2, int y2, uint8_t color_index)
 {

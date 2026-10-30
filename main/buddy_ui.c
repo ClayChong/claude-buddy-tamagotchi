@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "buddy_i4.h"
+#include "buddy_pack.h"
 #include "buddy_sprite.h"
 #include "buddy_text_layout.h"
 #include "lvgl.h"
@@ -28,6 +29,7 @@ static LV_ATTRIBUTE_MEM_ALIGN uint8_t s_canvas_buffer[
 static buddy_ui_snapshot_t s_snapshot;
 static bool s_have_snapshot;
 static uint32_t s_tick;
+static uint32_t s_pack_frame = UINT32_MAX;
 static uint64_t s_elapsed_ms;
 static int s_scroll;
 static buddy_i4_surface_t s_surface;
@@ -192,6 +194,35 @@ static uint8_t art_state(buddy_character_t state)
     }
 }
 
+static bool showing_pack(const buddy_ui_snapshot_t *s)
+{
+    return s->species == BUDDY_SPECIES_PACK && buddy_pack_available();
+}
+
+static const char *species_name(const buddy_ui_snapshot_t *s)
+{
+    return showing_pack(s) ? buddy_pack_name() : buddy_sprite_name(s->species);
+}
+
+/* Uploaded frames are drawn 1:1, centred below the name and inside the stage. */
+static void draw_pack(const buddy_i4_clip_t *clip, const buddy_ui_snapshot_t *s)
+{
+    uint16_t frame;
+    uint16_t width;
+    uint16_t height;
+    int top = 52;
+
+    if (!buddy_pack_frame((buddy_pack_state_t)art_state(s->character), s_elapsed_ms, &frame)) {
+        return;
+    }
+    buddy_pack_size(&width, &height);
+    if (top + height > BUDDY_UI_STAGE_Y + BUDDY_UI_STAGE_H) {
+        top = BUDDY_UI_STAGE_Y + BUDDY_UI_STAGE_H - height;
+    }
+    buddy_pack_draw(&s_surface, clip, frame, (UI_W - width) / 2, top);
+    s_pack_frame = frame;
+}
+
 static void draw_buddy(lv_layer_t *layer, const buddy_ui_snapshot_t *s, bool peek)
 {
     buddy_i4_clip_t clip = {.x = 0, .y = BUDDY_UI_STAGE_Y,
@@ -200,6 +231,10 @@ static void draw_buddy(lv_layer_t *layer, const buddy_ui_snapshot_t *s, bool pee
     int x = 88;
     int y = peek ? 72 : 65;
     (void)layer;
+    if (showing_pack(s)) {
+        draw_pack(&clip, s);
+        return;
+    }
     if (buddy_sprite_bounds(s->species, art_state(s->character), s_tick, &bounds)) {
         x = (UI_W - bounds.w) / 2 - bounds.x;
     }
@@ -229,7 +264,7 @@ static void draw_status_bar(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
 static void draw_home(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
 {
     char caption[176];
-    text(layer, 10, 35, 220, COL_ORANGE, buddy_sprite_name(s->species), false,
+    text(layer, 10, 35, 220, COL_ORANGE, species_name(s), false,
          LV_TEXT_ALIGN_CENTER);
     draw_buddy(layer, s, false);
     rule(layer, 18, BUDDY_UI_INFO_Y, 204, COL_LINE);
@@ -255,7 +290,7 @@ static void draw_pet(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
     char value[64];
     unsigned i;
     uint64_t level = s->tokens / 50000ULL;
-    text(layer, 9, 35, 222, COL_ORANGE, buddy_sprite_name(s->species), false, LV_TEXT_ALIGN_CENTER);
+    text(layer, 9, 35, 222, COL_ORANGE, species_name(s), false, LV_TEXT_ALIGN_CENTER);
     draw_buddy(layer, s, true);
     rule(layer, 12, BUDDY_UI_INFO_Y, 216, COL_LINE);
     text(layer, 16, 170, 62, COL_DIM, "MOOD", false, LV_TEXT_ALIGN_LEFT);
@@ -316,7 +351,7 @@ static void draw_list(lv_layer_t *layer, const char *title, const char *const *i
         if (!s->reset_open && i == BUDDY_SETTINGS_BRIGHTNESS) { snprintf(value, sizeof(value), "%u/4", s->brightness_level); suffix = value; }
         else if (!s->reset_open && i == BUDDY_SETTINGS_BLE) suffix = s->ble_enabled ? "ON" : "OFF";
         else if (!s->reset_open && i == BUDDY_SETTINGS_TRANSCRIPT) suffix = s->transcript_enabled ? "ON" : "OFF";
-        else if (!s->reset_open && i == BUDDY_SETTINGS_ASCII_PET) suffix = buddy_sprite_name(s->species);
+        else if (!s->reset_open && i == BUDDY_SETTINGS_ASCII_PET) suffix = species_name(s);
         snprintf(row, sizeof(row), "%s", items[i]);
         if (active) box(layer, 12, y - 7, 216, 24, COL_ORANGE, COL_ORANGE, 0, 3);
         text(layer, 20, y, 142, active ? COL_BG : COL_INK, row, false, LV_TEXT_ALIGN_LEFT);
@@ -446,9 +481,16 @@ void buddy_ui_show_passkey(uint32_t passkey)
 void buddy_ui_tick(uint64_t elapsed_ms)
 {
     uint32_t tick = (uint32_t)(elapsed_ms / 200U);
+    uint16_t frame;
     s_elapsed_ms = elapsed_ms;
     if (tick != s_tick) {
         s_tick = tick;
+        redraw();
+    } else if (s_have_snapshot && showing_pack(&s_snapshot) &&
+               buddy_pack_frame((buddy_pack_state_t)art_state(s_snapshot.character), elapsed_ms,
+                                &frame) &&
+               frame != s_pack_frame) {
+        /* Pack clips can run faster than the 200 ms built-in animation tick. */
         redraw();
     }
 }
