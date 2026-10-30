@@ -27,17 +27,20 @@ static void put32(uint8_t *p, uint32_t v)
     put16(p + 2, (uint16_t)(v >> 16));
 }
 
-/* states[i] = {first_clip, clip_count}; returns total size. */
-static size_t build_pack(uint8_t *out, const uint16_t states[7][2], const clip_spec_t *clips,
-                         uint16_t clip_count, uint16_t frame_count)
+/* states[i] = {first_clip, clip_count}; returns total size. Version 1 packs carry
+ * 7 states after the name, version 2 packs carry 14. */
+static size_t build_pack_version(uint8_t *out, uint16_t version, const uint16_t (*states)[2],
+                                 unsigned state_count, const clip_spec_t *clips,
+                                 uint16_t clip_count, uint16_t frame_count)
 {
-    size_t header = BUDDY_PACK_FIXED_HEADER + clip_count * BUDDY_PACK_CLIP_BYTES + 4U;
+    size_t fixed = 48U + state_count * 4U;
+    size_t header = fixed + clip_count * BUDDY_PACK_CLIP_BYTES + 4U;
     uint32_t payload = frame_count * FRAME_BYTES;
     unsigned i;
 
     memset(out, 0, header + payload);
     memcpy(out, BUDDY_PACK_MAGIC, 4);
-    put16(out + 4, BUDDY_PACK_VERSION);
+    put16(out + 4, version);
     put16(out + 6, (uint16_t)header);
     put16(out + 8, W);
     put16(out + 10, H);
@@ -45,12 +48,12 @@ static size_t build_pack(uint8_t *out, const uint16_t states[7][2], const clip_s
     put16(out + 14, frame_count);
     put32(out + 16, payload);
     memcpy(out + 24, "ANGEL", 5);
-    for (i = 0; i < 7U; ++i) {
+    for (i = 0; i < state_count; ++i) {
         put16(out + 48 + i * 4U, states[i][0]);
         put16(out + 50 + i * 4U, states[i][1]);
     }
     for (i = 0; i < clip_count; ++i) {
-        uint8_t *c = out + BUDDY_PACK_FIXED_HEADER + i * BUDDY_PACK_CLIP_BYTES;
+        uint8_t *c = out + fixed + i * BUDDY_PACK_CLIP_BYTES;
         put16(c, clips[i].first_frame);
         put16(c + 2, clips[i].frame_count);
         put16(c + 4, clips[i].frame_ms);
@@ -61,6 +64,12 @@ static size_t build_pack(uint8_t *out, const uint16_t states[7][2], const clip_s
     put32(out + 20, buddy_pack_crc32(0, out + header, payload));
     put32(out + header - 4U, buddy_pack_crc32(0, out, header - 4U));
     return header + payload;
+}
+
+static size_t build_pack(uint8_t *out, const uint16_t states[7][2], const clip_spec_t *clips,
+                         uint16_t clip_count, uint16_t frame_count)
+{
+    return build_pack_version(out, 1, states, 7, clips, clip_count, frame_count);
 }
 
 /* sleep: clip 0; idle: clips 1-2 (carousel); others missing. */
@@ -511,11 +520,103 @@ static void test_species_cycle(void)
     assert(state.species == 0);
 }
 
+/* idle clip 0, heart clip 1, celebrate clip 2, dizzy clip 3, eat clip 4. */
+static const clip_spec_t k_care_clips[5] = {
+    {0, 1, 300}, {1, 1, 200}, {2, 1, 100}, {3, 1, 200}, {4, 1, 200}};
+
+static void test_v1_pack_leaves_new_states_empty(void)
+{
+    static uint8_t pack[1024];
+    buddy_pack_info_t info;
+
+    assert(buddy_pack_parse_header(pack, build_pack(pack, k_states, k_clips, 3, 6), &info));
+    assert(info.version == 1);
+    assert(info.states[BUDDY_PACK_IDLE].clip_count == 2);
+    assert(info.states[BUDDY_PACK_EAT].clip_count == 0);
+    assert(info.states[BUDDY_PACK_TIRED].clip_count == 0);
+}
+
+static void test_v2_pack_reads_fourteen_states(void)
+{
+    static uint8_t pack[1024];
+    uint16_t states[BUDDY_PACK_STATE_COUNT][2] = {{0}};
+    buddy_pack_info_t info;
+    size_t size;
+
+    states[BUDDY_PACK_IDLE][0] = 0;
+    states[BUDDY_PACK_IDLE][1] = 1;
+    states[BUDDY_PACK_HEART][0] = 1;
+    states[BUDDY_PACK_HEART][1] = 1;
+    states[BUDDY_PACK_EAT][0] = 4;
+    states[BUDDY_PACK_EAT][1] = 1;
+    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    assert(buddy_pack_parse_header(pack, size, &info));
+    assert(info.version == 2);
+    assert(info.header_size == 104U + 8U * 5U + 4U);
+    assert(info.states[BUDDY_PACK_EAT].first_clip == 4);
+    assert(info.states[BUDDY_PACK_EAT].clip_count == 1);
+    assert(info.clips[4].frame_ms == 200);
+}
+
+static void test_version_3_rejected(void)
+{
+    static uint8_t pack[1024];
+    uint16_t states[BUDDY_PACK_STATE_COUNT][2] = {{0}};
+    buddy_pack_info_t info;
+    size_t size;
+
+    states[BUDDY_PACK_IDLE][1] = 1;
+    size = build_pack_version(pack, 3, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    assert(!buddy_pack_parse_header(pack, size, &info));
+}
+
+static void test_resolve_fallbacks(void)
+{
+    static uint8_t pack[1024];
+    uint16_t states[BUDDY_PACK_STATE_COUNT][2] = {{0}};
+    buddy_pack_info_t info;
+    buddy_pack_state_t r;
+    uint16_t f;
+    size_t size;
+
+    states[BUDDY_PACK_IDLE][0] = 0;
+    states[BUDDY_PACK_IDLE][1] = 1;
+    states[BUDDY_PACK_HEART][0] = 1;
+    states[BUDDY_PACK_HEART][1] = 1;
+    states[BUDDY_PACK_CELEBRATE][0] = 2;
+    states[BUDDY_PACK_CELEBRATE][1] = 1;
+    states[BUDDY_PACK_DIZZY][0] = 3;
+    states[BUDDY_PACK_DIZZY][1] = 1;
+    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    assert(buddy_pack_parse_header(pack, size, &info));
+
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_EAT, &r) && r == BUDDY_PACK_HEART);
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_PAT, &r) && r == BUDDY_PACK_HEART);
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_PLAY, &r) && r == BUDDY_PACK_CELEBRATE);
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_REFUSE, &r) && r == BUDDY_PACK_DIZZY);
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_SLEEP, &r) && r == BUDDY_PACK_IDLE);
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_IDLE, &r) && r == BUDDY_PACK_IDLE);
+    assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_HUNGRY, &r));
+    assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_SAD, &r));
+    assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_TIRED, &r));
+    assert(buddy_pack_frame_at(&info, BUDDY_PACK_EAT, 0, &f) && f == 1);
+    assert(!buddy_pack_frame_at(&info, BUDDY_PACK_HUNGRY, 0, &f));
+
+    states[BUDDY_PACK_DIZZY][1] = 0;
+    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    assert(buddy_pack_parse_header(pack, size, &info));
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_REFUSE, &r) && r == BUDDY_PACK_IDLE);
+}
+
 int main(void)
 {
     test_crc_and_base64();
     test_header_validation();
     test_frame_timing();
+    test_v1_pack_leaves_new_states_empty();
+    test_v2_pack_reads_fourteen_states();
+    test_version_3_rejected();
+    test_resolve_fallbacks();
     test_upload_flow();
     test_upload_errors();
     test_protocol_transfer();

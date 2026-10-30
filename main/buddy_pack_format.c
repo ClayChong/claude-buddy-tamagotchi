@@ -31,13 +31,25 @@ uint32_t buddy_pack_crc32(uint32_t crc, const uint8_t *data, size_t length)
 bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info_t *info)
 {
     size_t expected_header;
+    size_t fixed_header;
+    unsigned state_count;
     unsigned index;
 
-    if (data == NULL || info == NULL || length < BUDDY_PACK_FIXED_HEADER + 4U ||
-        memcmp(data, BUDDY_PACK_MAGIC, 4) != 0 || read_u16(data + 4) != BUDDY_PACK_VERSION) {
+    if (data == NULL || info == NULL || length < BUDDY_PACK_FIXED_HEADER_V1 + 4U ||
+        memcmp(data, BUDDY_PACK_MAGIC, 4) != 0) {
+        return false;
+    }
+    if (read_u16(data + 4) == 1U) {
+        state_count = BUDDY_PACK_V1_STATE_COUNT;
+        fixed_header = BUDDY_PACK_FIXED_HEADER_V1;
+    } else if (read_u16(data + 4) == BUDDY_PACK_VERSION) {
+        state_count = BUDDY_PACK_STATE_COUNT;
+        fixed_header = BUDDY_PACK_FIXED_HEADER;
+    } else {
         return false;
     }
     memset(info, 0, sizeof(*info));
+    info->version = read_u16(data + 4);
     info->header_size = read_u16(data + 6);
     info->width = read_u16(data + 8);
     info->height = read_u16(data + 10);
@@ -52,7 +64,7 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
         info->frame_count == 0U || info->frame_count > BUDDY_PACK_MAX_FRAMES) {
         return false;
     }
-    expected_header = BUDDY_PACK_FIXED_HEADER + (size_t)info->clip_count * BUDDY_PACK_CLIP_BYTES + 4U;
+    expected_header = fixed_header + (size_t)info->clip_count * BUDDY_PACK_CLIP_BYTES + 4U;
     if (info->header_size != expected_header || length < expected_header ||
         read_u32(data + expected_header - 4U) !=
             buddy_pack_crc32(0, data, expected_header - 4U)) {
@@ -72,7 +84,7 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
         }
     }
 
-    for (index = 0; index < BUDDY_PACK_STATE_COUNT; ++index) {
+    for (index = 0; index < state_count; ++index) {
         const uint8_t *entry = data + 48U + index * 4U;
         buddy_pack_state_entry_t *state = &info->states[index];
 
@@ -88,7 +100,7 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
     }
 
     for (index = 0; index < info->clip_count; ++index) {
-        const uint8_t *entry = data + BUDDY_PACK_FIXED_HEADER + index * BUDDY_PACK_CLIP_BYTES;
+        const uint8_t *entry = data + fixed_header + index * BUDDY_PACK_CLIP_BYTES;
         buddy_pack_clip_t *clip = &info->clips[index];
 
         clip->first_frame = read_u16(entry);
@@ -107,24 +119,64 @@ uint32_t buddy_pack_total_size(const buddy_pack_info_t *info)
     return info == NULL ? 0U : (uint32_t)info->header_size + info->payload_size;
 }
 
+static bool buddy_pack_has_clips(const buddy_pack_info_t *info, buddy_pack_state_t state)
+{
+    return info->states[state].clip_count != 0U;
+}
+
+bool buddy_pack_resolve_state(const buddy_pack_info_t *info, buddy_pack_state_t state,
+                              buddy_pack_state_t *resolved)
+{
+    buddy_pack_state_t fallback = BUDDY_PACK_IDLE;
+
+    if (info == NULL || resolved == NULL || state >= BUDDY_PACK_STATE_COUNT) {
+        return false;
+    }
+    if (buddy_pack_has_clips(info, state)) {
+        *resolved = state;
+        return true;
+    }
+    switch (state) {
+    case BUDDY_PACK_HUNGRY:
+    case BUDDY_PACK_SAD:
+    case BUDDY_PACK_TIRED:
+        return false;
+    case BUDDY_PACK_EAT:
+    case BUDDY_PACK_PAT:
+        fallback = BUDDY_PACK_HEART;
+        break;
+    case BUDDY_PACK_PLAY:
+        fallback = BUDDY_PACK_CELEBRATE;
+        break;
+    case BUDDY_PACK_REFUSE:
+        fallback = BUDDY_PACK_DIZZY;
+        break;
+    default:
+        break;
+    }
+    if (!buddy_pack_has_clips(info, fallback)) {
+        fallback = BUDDY_PACK_IDLE;
+    }
+    if (!buddy_pack_has_clips(info, fallback)) {
+        return false;
+    }
+    *resolved = fallback;
+    return true;
+}
+
 bool buddy_pack_frame_at(const buddy_pack_info_t *info, buddy_pack_state_t state,
                          uint64_t elapsed_ms, uint16_t *frame_index)
 {
     const buddy_pack_state_entry_t *entry;
+    buddy_pack_state_t resolved;
     uint64_t cycle_ms = 0;
     uint64_t position;
     unsigned index;
 
-    if (info == NULL || frame_index == NULL || state >= BUDDY_PACK_STATE_COUNT) {
+    if (frame_index == NULL || !buddy_pack_resolve_state(info, state, &resolved)) {
         return false;
     }
-    entry = &info->states[state];
-    if (entry->clip_count == 0U) {
-        entry = &info->states[BUDDY_PACK_IDLE];
-    }
-    if (entry->clip_count == 0U) {
-        return false;
-    }
+    entry = &info->states[resolved];
     for (index = 0; index < entry->clip_count; ++index) {
         const buddy_pack_clip_t *clip = &info->clips[entry->first_clip + index];
         cycle_ms += (uint64_t)clip->frame_count * clip->frame_ms;

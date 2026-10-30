@@ -19,8 +19,10 @@
  *   16  u32      payload size (frame_count * frame_bytes)
  *   20  u32      payload CRC-32
  *   24  char[24] name, NUL padded
- *   48  7 x {u16 first_clip, u16 clip_count}, in buddy_pack_state_t order
- *   76  clip_count x {u16 first_frame, u16 frame_count, u16 frame_ms, u16 reserved}
+ *   48  N x {u16 first_clip, u16 clip_count}, in buddy_pack_state_t order;
+ *       N is 7 in version 1 and 14 in version 2
+ *   F   clip_count x {u16 first_frame, u16 frame_count, u16 frame_ms, u16 reserved};
+ *       F is 76 in version 1 and 104 in version 2
  *   ..  u32      header CRC-32 over bytes [0, header_size - 4)
  *   header_size: frames, row-major, two pixels per byte, high nibble = left pixel
  */
@@ -30,9 +32,11 @@
 #include <stdint.h>
 
 #define BUDDY_PACK_MAGIC "BPK1"
-#define BUDDY_PACK_VERSION 1U
+#define BUDDY_PACK_VERSION 2U
 #define BUDDY_PACK_NAME_MAX 24U
-#define BUDDY_PACK_FIXED_HEADER 76U
+#define BUDDY_PACK_V1_STATE_COUNT 7U
+#define BUDDY_PACK_FIXED_HEADER_V1 76U
+#define BUDDY_PACK_FIXED_HEADER 104U
 #define BUDDY_PACK_CLIP_BYTES 8U
 #define BUDDY_PACK_MAX_CLIPS 64U
 #define BUDDY_PACK_MAX_FRAMES 512U
@@ -42,7 +46,8 @@
 #define BUDDY_PACK_MAX_HEADER \
     (BUDDY_PACK_FIXED_HEADER + BUDDY_PACK_MAX_CLIPS * BUDDY_PACK_CLIP_BYTES + 4U)
 
-/* Same order as the upstream manifest "states" keys. */
+/* The first seven follow the upstream manifest "states" keys; version 2 adds the
+ * care reactions and mood idles. */
 typedef enum {
     BUDDY_PACK_SLEEP,
     BUDDY_PACK_IDLE,
@@ -51,6 +56,13 @@ typedef enum {
     BUDDY_PACK_CELEBRATE,
     BUDDY_PACK_DIZZY,
     BUDDY_PACK_HEART,
+    BUDDY_PACK_EAT,
+    BUDDY_PACK_PLAY,
+    BUDDY_PACK_PAT,
+    BUDDY_PACK_REFUSE,
+    BUDDY_PACK_HUNGRY,
+    BUDDY_PACK_SAD,
+    BUDDY_PACK_TIRED,
     BUDDY_PACK_STATE_COUNT,
 } buddy_pack_state_t;
 
@@ -67,6 +79,7 @@ typedef struct {
 
 typedef struct {
     char name[BUDDY_PACK_NAME_MAX + 1U];
+    uint16_t version;
     uint16_t header_size;
     uint16_t width;
     uint16_t height;
@@ -88,8 +101,14 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
 /* Total bytes the pack occupies (header + payload). */
 uint32_t buddy_pack_total_size(const buddy_pack_info_t *info);
 
-/* Frame to show for a state at a point in time. States without clips fall
- * back to idle. Several clips in one state play one after another (the
- * upstream idle carousel). Returns false if there is nothing to show. */
+/* The state whose clips play for a requested state. Empty states fall back:
+ * eat and pat to heart, play to celebrate, refuse to dizzy, the rest to idle.
+ * Empty mood states (hungry, sad, tired) have no fallback and return false. */
+bool buddy_pack_resolve_state(const buddy_pack_info_t *info, buddy_pack_state_t state,
+                              buddy_pack_state_t *resolved);
+
+/* Frame to show for a state at a point in time, after fallback. Several clips
+ * in one state play one after another (the upstream idle carousel). Returns
+ * false if there is nothing to show. */
 bool buddy_pack_frame_at(const buddy_pack_info_t *info, buddy_pack_state_t state,
                          uint64_t elapsed_ms, uint16_t *frame_index);
