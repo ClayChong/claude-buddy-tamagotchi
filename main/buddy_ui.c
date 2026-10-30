@@ -197,7 +197,8 @@ static uint8_t art_state(buddy_character_t state)
     case BUDDY_CHARACTER_REFUSE: return 5;
     case BUDDY_CHARACTER_HEART:
     case BUDDY_CHARACTER_EAT:
-    case BUDDY_CHARACTER_PAT: return 6;
+    case BUDDY_CHARACTER_PAT:
+    case BUDDY_CHARACTER_CLEAN: return 6;
     default: return 1;
     }
 }
@@ -211,6 +212,7 @@ static buddy_pack_state_t pack_state(buddy_character_t state)
     case BUDDY_CHARACTER_PLAY: return BUDDY_PACK_PLAY;
     case BUDDY_CHARACTER_PAT: return BUDDY_PACK_PAT;
     case BUDDY_CHARACTER_REFUSE: return BUDDY_PACK_REFUSE;
+    case BUDDY_CHARACTER_CLEAN: return BUDDY_PACK_CLEAN;
     default: return (buddy_pack_state_t)art_state(state);
     }
 }
@@ -252,6 +254,90 @@ static void draw_pack(const buddy_i4_clip_t *clip, const buddy_ui_snapshot_t *s)
     s_pack_frame = frame;
 }
 
+/* Built-in poop for packs without poop frames, drawn at 2x: 'b' brown,
+ * 't' terracotta. */
+static const char *const s_poop_art[] = {
+    "........b.......",
+    ".......bb.......",
+    "......bbtb......",
+    ".....bbbbbb.....",
+    "....bttbbbbb....",
+    "....bbbbbbbb....",
+    "...bbbbbbbtbb...",
+    "..bttbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    ".bbbbbbbbbbbtbb.",
+    "bttbbbbbbbbbbbbb",
+    "bbbbbbbbbbbbbbbb",
+    ".bbbbbbbbbbbbbb.",
+};
+
+static void draw_builtin_poop(int bottom, unsigned phase)
+{
+    const int rows = (int)(sizeof(s_poop_art) / sizeof(s_poop_art[0]));
+    int left = BUDDY_UI_POOP_X + (BUDDY_UI_POOP_SIZE - 32) / 2;
+    int top = bottom - rows * 2;
+    int row;
+    int column;
+    int k;
+
+    for (row = 0; row < rows; ++row) {
+        for (column = 0; column < 16; ++column) {
+            char c = s_poop_art[row][column];
+            uint8_t index = c == 'b' ? color_index(lv_color_hex(0xA96349))
+                          : c == 't' ? color_index(lv_color_hex(0xD97757)) : 0U;
+            if (index == 0U) continue;
+            pixel(left + column * 2, top + row * 2, index);
+            pixel(left + column * 2 + 1, top + row * 2, index);
+            pixel(left + column * 2, top + row * 2 + 1, index);
+            pixel(left + column * 2 + 1, top + row * 2 + 1, index);
+        }
+    }
+    /* A wavy stink line above the tip. */
+    for (k = 0; k < 3; ++k) {
+        int x = left + 16 + (((unsigned)k + phase) & 1U ? 2 : -2);
+        int y = top - 4 - k * 4;
+        uint8_t green = color_index(COL_GREEN);
+        pixel(x, y, green);
+        pixel(x + 1, y, green);
+        pixel(x, y + 1, green);
+        pixel(x + 1, y + 1, green);
+    }
+}
+
+/* Pack poop frames hold the poop in their bottom-left quarter. */
+static void draw_poop(const buddy_ui_snapshot_t *s)
+{
+    const buddy_pack_info_t *info = showing_pack(s) ? buddy_pack_info() : NULL;
+    unsigned i;
+
+    for (i = 0; i < s->poop && i < BUDDY_PET_POOP_MAX; ++i) {
+        int bottom = BUDDY_UI_POOP_BOTTOM - (int)i * BUDDY_UI_POOP_STEP;
+        uint16_t frame;
+        uint16_t width;
+        uint16_t height;
+
+        /* Offset each poop's clock so the pile doesn't move in step. */
+        if (info != NULL &&
+            buddy_pack_frame_at(info, BUDDY_PACK_POOP, s_elapsed_ms + i * 170U, &frame)) {
+            buddy_i4_clip_t clip;
+
+            buddy_pack_size(&width, &height);
+            clip.w = (int16_t)(width / 2U);
+            clip.h = (int16_t)(height / 2U);
+            clip.x = (int16_t)(BUDDY_UI_POOP_X + (BUDDY_UI_POOP_SIZE - clip.w) / 2);
+            clip.y = (int16_t)(bottom - clip.h);
+            if (clip.y < BUDDY_UI_STAGE_Y) {
+                clip.h = (int16_t)(clip.h - (BUDDY_UI_STAGE_Y - clip.y));
+                clip.y = BUDDY_UI_STAGE_Y;
+            }
+            buddy_pack_draw(&s_surface, &clip, frame, clip.x, bottom - height);
+        } else {
+            draw_builtin_poop(bottom, (s_tick + i) & 1U);
+        }
+    }
+}
+
 static void draw_buddy(lv_layer_t *layer, const buddy_ui_snapshot_t *s, bool peek)
 {
     buddy_i4_clip_t clip = {.x = 0, .y = BUDDY_UI_STAGE_Y,
@@ -260,6 +346,7 @@ static void draw_buddy(lv_layer_t *layer, const buddy_ui_snapshot_t *s, bool pee
     int x = 88;
     int y = peek ? 72 : 65;
     (void)layer;
+    draw_poop(s);
     if (showing_pack(s)) {
         draw_pack(&clip, s);
         return;
@@ -301,7 +388,8 @@ static void draw_home(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
              (s->ble_connected ? "WAITING FOR CLAUDE" : "OPEN CLAUDE DESKTOP TO PAIR"));
     wrapped_text(layer, 18, 174, 204, s->heartbeat_stale ? COL_DIM : COL_INK,
                  caption, 8);
-    text(layer, 8, 300, 224, COL_DIM, BUDDY_ACTION_HOME, false, LV_TEXT_ALIGN_CENTER);
+    text(layer, 8, 300, 224, COL_DIM, s->poop > 0U ? BUDDY_ACTION_HOME_POOP : BUDDY_ACTION_HOME,
+         false, LV_TEXT_ALIGN_CENTER);
 }
 
 static lv_color_t mood_color(buddy_mood_t mood)
@@ -311,6 +399,7 @@ static lv_color_t mood_color(buddy_mood_t mood)
     case BUDDY_MOOD_HUNGRY: return COL_RED;
     case BUDDY_MOOD_TIRED: return COL_YELLOW;
     case BUDDY_MOOD_SAD: return COL_BLUE;
+    case BUDDY_MOOD_STINKY: return COL_GREEN;
     default: return COL_INK;
     }
 }
@@ -361,7 +450,8 @@ static void draw_pet(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
         box(layer, x, 274, 64, 16, on ? COL_ORANGE : COL_BG, on ? COL_ORANGE : COL_LINE, 1, 3);
         text(layer, x, 278, 64, on ? COL_BG : COL_DIM, care[i], false, LV_TEXT_ALIGN_CENTER);
     }
-    text(layer, 8, 300, 224, COL_DIM, BUDDY_ACTION_PET, false, LV_TEXT_ALIGN_CENTER);
+    text(layer, 8, 300, 224, COL_DIM, s->poop > 0U ? BUDDY_ACTION_PET_POOP : BUDDY_ACTION_PET,
+         false, LV_TEXT_ALIGN_CENTER);
 }
 
 static void draw_info(lv_layer_t *layer, const buddy_ui_snapshot_t *s)

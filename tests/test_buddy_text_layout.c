@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "buddy_pet.h"
 #include "buddy_text_layout.h"
 
 static unsigned width(const char *text, size_t length, void *context)
@@ -26,6 +27,17 @@ int main(void)
     assert(strlen(BUDDY_ACTION_PET) * 8U <= 224U);
     assert(strstr(BUDDY_ACTION_HOME, "OK:PAT") != NULL);
     assert(strstr(BUDDY_ACTION_PET, "OK:DO") != NULL);
+    assert(strlen(BUDDY_ACTION_HOME_POOP) * 8U <= 224U);
+    assert(strstr(BUDDY_ACTION_HOME_POOP, "2xOK:CLEAN") != NULL);
+    assert(strstr(BUDDY_ACTION_HOME_POOP, "OK:PAT") != NULL);
+    assert(strlen(BUDDY_ACTION_PET_POOP) * 8U <= 224U);
+    assert(strstr(BUDDY_ACTION_PET_POOP, "2xOK:CLEAN") != NULL);
+    /* A full pile stands right of a 96 px buddy and inside the stage. */
+    assert(BUDDY_UI_POOP_X >= (240 + 96) / 2);
+    assert(BUDDY_UI_POOP_X + BUDDY_UI_POOP_SIZE <= 240);
+    assert(BUDDY_UI_POOP_BOTTOM <= BUDDY_UI_STAGE_Y + BUDDY_UI_STAGE_H);
+    assert(BUDDY_UI_POOP_BOTTOM - BUDDY_UI_POOP_SIZE -
+               (int)(BUDDY_PET_POOP_MAX - 1U) * BUDDY_UI_POOP_STEP >= BUDDY_UI_STAGE_Y);
     assert(strlen(BUDDY_ACTION_INFO) * 8U <= 224U);
     assert(strlen(BUDDY_ACTION_SETTINGS) * 8U <= 224U);
     assert(strlen(BUDDY_ACTION_CONFIRM) * 8U <= 204U);

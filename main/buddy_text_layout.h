@@ -11,9 +11,17 @@
 #define BUDDY_UI_INFO_H 138
 #define BUDDY_UI_ACTION_Y 296
 #define BUDDY_UI_ACTION_H 24
+/* The poop pile: a column right of the buddy, oldest poop at the bottom, each
+ * one BUDDY_UI_POOP_STEP above the last so they overlap. */
+#define BUDDY_UI_POOP_X 176
+#define BUDDY_UI_POOP_SIZE 48
+#define BUDDY_UI_POOP_STEP 24
+#define BUDDY_UI_POOP_BOTTOM 156
 
 #define BUDDY_ACTION_HOME "UP:PAGE  OK:PAT  HOLD:MENU"
 #define BUDDY_ACTION_PET "DOWN:PICK  OK:DO  HOLD:MENU"
+#define BUDDY_ACTION_HOME_POOP "OK:PAT  2xOK:CLEAN  UP:PAGE"
+#define BUDDY_ACTION_PET_POOP "DOWN:PICK  OK:DO  2xOK:CLEAN"
 #define BUDDY_ACTION_INFO "DOWN:NEXT  HOLD OK:MENU"
 #define BUDDY_ACTION_SETTINGS "UP/DOWN:SELECT  OK:SET"
 #define BUDDY_ACTION_CONFIRM "OK:YES  DOWN:NO"
