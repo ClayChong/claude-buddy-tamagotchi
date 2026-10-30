@@ -40,6 +40,7 @@ typedef enum {
     BUDDY_CHARACTER_PLAY,
     BUDDY_CHARACTER_PAT,
     BUDDY_CHARACTER_REFUSE,
+    BUDDY_CHARACTER_CLEAN,
 } buddy_character_t;
 
 typedef enum {
@@ -55,6 +56,7 @@ typedef enum {
     BUDDY_MOOD_HUNGRY,
     BUDDY_MOOD_TIRED,
     BUDDY_MOOD_SAD,
+    BUDDY_MOOD_STINKY,
 } buddy_mood_t;
 
 typedef enum {

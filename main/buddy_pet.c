@@ -14,6 +14,8 @@
 #define BUDDY_PET_FEED_REFUSE 90U
 #define BUDDY_PET_PLAY 20
 #define BUDDY_PET_PAT 5
+/* Each uncleaned poop costs one extra happiness point per this many seconds. */
+#define BUDDY_PET_POOP_PENALTY_S 1800U
 
 /* Moves value one point per period, towards 0 (down) or 100 (up). */
 static uint8_t buddy_pet_step(uint8_t value, uint32_t *carry, uint32_t seconds,
@@ -47,6 +49,8 @@ void buddy_pet_init(buddy_pet_t *pet)
     pet->fullness_carry_s = 0;
     pet->happiness_carry_s = 0;
     pet->energy_units = 0;
+    pet->poop = 0;
+    pet->poop_carry_s = 0;
 }
 
 void buddy_pet_elapse(buddy_pet_t *pet, uint32_t seconds, buddy_pet_activity_t activity)
@@ -54,6 +58,7 @@ void buddy_pet_elapse(buddy_pet_t *pet, uint32_t seconds, buddy_pet_activity_t a
     int64_t rate = BUDDY_PET_ENERGY_AWAKE;
     int64_t units;
     int64_t steps;
+    uint64_t poop_units;
 
     if (pet == NULL) {
         return;
@@ -62,6 +67,13 @@ void buddy_pet_elapse(buddy_pet_t *pet, uint32_t seconds, buddy_pet_activity_t a
                                    BUDDY_PET_FULLNESS_S, false);
     pet->happiness = buddy_pet_step(pet->happiness, &pet->happiness_carry_s, seconds,
                                     BUDDY_PET_HAPPINESS_S, false);
+    if (pet->poop > 0U) {
+        poop_units = (uint64_t)pet->poop_carry_s + (uint64_t)pet->poop * seconds;
+        pet->poop_carry_s = (uint32_t)(poop_units % BUDDY_PET_POOP_PENALTY_S);
+        poop_units /= BUDDY_PET_POOP_PENALTY_S;
+        pet->happiness = poop_units >= pet->happiness ? 0U
+                                                      : (uint8_t)(pet->happiness - poop_units);
+    }
     if (activity == BUDDY_PET_BUSY) {
         rate = BUDDY_PET_ENERGY_BUSY;
     } else if (activity == BUDDY_PET_SLEEPING) {
@@ -110,10 +122,30 @@ void buddy_pet_pat(buddy_pet_t *pet)
     buddy_pet_add(pet, BUDDY_PET_HAPPINESS, BUDDY_PET_PAT);
 }
 
+bool buddy_pet_add_poop(buddy_pet_t *pet)
+{
+    if (pet == NULL || pet->poop >= BUDDY_PET_POOP_MAX) {
+        return false;
+    }
+    ++pet->poop;
+    return true;
+}
+
+bool buddy_pet_clean(buddy_pet_t *pet)
+{
+    if (pet == NULL || pet->poop == 0U) {
+        return false;
+    }
+    pet->poop = 0;
+    pet->poop_carry_s = 0;
+    return true;
+}
+
 buddy_mood_t buddy_pet_mood(const buddy_pet_t *pet)
 {
     if (pet == NULL) return BUDDY_MOOD_NORMAL;
     if (pet->fullness < 25U) return BUDDY_MOOD_HUNGRY;
+    if (pet->poop > 0U) return BUDDY_MOOD_STINKY;
     if (pet->energy < 20U) return BUDDY_MOOD_TIRED;
     if (pet->happiness < 25U) return BUDDY_MOOD_SAD;
     if (pet->fullness >= 70U && pet->happiness >= 70U && pet->energy >= 70U) {
@@ -137,6 +169,7 @@ const char *buddy_mood_name(buddy_mood_t mood)
     case BUDDY_MOOD_HUNGRY: return "HUNGRY";
     case BUDDY_MOOD_TIRED: return "TIRED";
     case BUDDY_MOOD_SAD: return "SAD";
+    case BUDDY_MOOD_STINKY: return "STINKY";
     default: return "OK";
     }
 }
@@ -146,7 +179,8 @@ uint64_t buddy_pet_pack(const buddy_pet_t *pet, uint32_t epoch_seconds)
     if (pet == NULL) {
         return 0;
     }
-    return ((uint64_t)epoch_seconds << 32) | ((uint64_t)pet->energy << 16) |
+    return ((uint64_t)epoch_seconds << 32) | ((uint64_t)pet->poop << 24) |
+           ((uint64_t)pet->energy << 16) |
            ((uint64_t)pet->happiness << 8) | pet->fullness;
 }
 
@@ -155,15 +189,17 @@ bool buddy_pet_unpack(uint64_t packed, buddy_pet_t *pet, uint32_t *epoch_seconds
     uint8_t fullness = (uint8_t)packed;
     uint8_t happiness = (uint8_t)(packed >> 8);
     uint8_t energy = (uint8_t)(packed >> 16);
+    uint8_t poop = (uint8_t)(packed >> 24);
 
     if (pet == NULL || fullness > BUDDY_PET_MAX || happiness > BUDDY_PET_MAX ||
-        energy > BUDDY_PET_MAX) {
+        energy > BUDDY_PET_MAX || poop > BUDDY_PET_POOP_MAX) {
         return false;
     }
     buddy_pet_init(pet);
     pet->fullness = fullness;
     pet->happiness = happiness;
     pet->energy = energy;
+    pet->poop = poop;
     if (epoch_seconds != NULL) {
         *epoch_seconds = (uint32_t)(packed >> 32);
     }
