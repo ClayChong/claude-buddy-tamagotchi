@@ -139,6 +139,26 @@ static void test_missing_mood_clip_ignored(void)
     }
 }
 
+static void test_stinky_mood_uses_stinky_clip(void)
+{
+    buddy_pack_info_t info;
+    buddy_anim_t anim;
+    unsigned stinky = 0;
+    unsigned k;
+
+    make_info(&info, 4, false);
+    info.states[BUDDY_PACK_STINKY] = (buddy_pack_state_entry_t){5, 1};
+    buddy_anim_init(&anim, 4242);
+    for (k = 0; k < BOUNDARIES; ++k) {
+        uint16_t frame = 0xffff;
+
+        assert(buddy_anim_frame(&anim, &info, BUDDY_PACK_IDLE, BUDDY_MOOD_STINKY,
+                                (uint64_t)k * CLIP_MS + 1U, &frame));
+        if (clip_of(frame) == 5) ++stinky;
+    }
+    assert(stinky > BOUNDARIES / 20U);
+}
+
 static void test_pack_change_restarts(void)
 {
     buddy_pack_info_t info;
@@ -211,6 +231,7 @@ int main(void)
     test_single_idle_clip_always_base();
     test_mood_clip_share();
     test_missing_mood_clip_ignored();
+    test_stinky_mood_uses_stinky_clip();
     test_pack_change_restarts();
     test_clip_table_change_with_same_crc();
     test_long_gap_returns_quickly();

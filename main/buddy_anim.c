@@ -42,6 +42,7 @@ static bool buddy_anim_mood_state(buddy_mood_t mood, buddy_pack_state_t *state)
     case BUDDY_MOOD_HUNGRY: *state = BUDDY_PACK_HUNGRY; return true;
     case BUDDY_MOOD_TIRED: *state = BUDDY_PACK_TIRED; return true;
     case BUDDY_MOOD_SAD: *state = BUDDY_PACK_SAD; return true;
+    case BUDDY_MOOD_STINKY: *state = BUDDY_PACK_STINKY; return true;
     default: return false;
     }
 }
