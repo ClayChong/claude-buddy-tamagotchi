@@ -10,7 +10,7 @@
  *
  * Layout (little-endian):
  *   0   char[4]  magic "BPK1"
- *   4   u16      version (1)
+ *   4   u16      version (1, 2 or 3)
  *   6   u16      header_size, bytes before the first frame
  *   8   u16      frame width (even)
  *   10  u16      frame height
@@ -20,9 +20,9 @@
  *   20  u32      payload CRC-32
  *   24  char[24] name, NUL padded
  *   48  N x {u16 first_clip, u16 clip_count}, in buddy_pack_state_t order;
- *       N is 7 in version 1 and 14 in version 2
+ *       N is 7 in version 1, 14 in version 2 and 17 in version 3
  *   F   clip_count x {u16 first_frame, u16 frame_count, u16 frame_ms, u16 reserved};
- *       F is 76 in version 1 and 104 in version 2
+ *       F is 76 in version 1, 104 in version 2 and 116 in version 3
  *   ..  u32      header CRC-32 over bytes [0, header_size - 4)
  *   header_size: frames, row-major, two pixels per byte, high nibble = left pixel
  */
@@ -32,11 +32,13 @@
 #include <stdint.h>
 
 #define BUDDY_PACK_MAGIC "BPK1"
-#define BUDDY_PACK_VERSION 2U
+#define BUDDY_PACK_VERSION 3U
 #define BUDDY_PACK_NAME_MAX 24U
 #define BUDDY_PACK_V1_STATE_COUNT 7U
 #define BUDDY_PACK_FIXED_HEADER_V1 76U
-#define BUDDY_PACK_FIXED_HEADER 104U
+#define BUDDY_PACK_V2_STATE_COUNT 14U
+#define BUDDY_PACK_FIXED_HEADER_V2 104U
+#define BUDDY_PACK_FIXED_HEADER 116U
 #define BUDDY_PACK_CLIP_BYTES 8U
 #define BUDDY_PACK_MAX_CLIPS 64U
 #define BUDDY_PACK_MAX_FRAMES 512U
@@ -47,7 +49,8 @@
     (BUDDY_PACK_FIXED_HEADER + BUDDY_PACK_MAX_CLIPS * BUDDY_PACK_CLIP_BYTES + 4U)
 
 /* The first seven follow the upstream manifest "states" keys; version 2 adds the
- * care reactions and mood idles. */
+ * care reactions and mood idles, version 3 the poop clean-up. POOP frames hold
+ * the poop in their bottom-left quarter; the device draws only that quarter. */
 typedef enum {
     BUDDY_PACK_SLEEP,
     BUDDY_PACK_IDLE,
@@ -63,6 +66,9 @@ typedef enum {
     BUDDY_PACK_HUNGRY,
     BUDDY_PACK_SAD,
     BUDDY_PACK_TIRED,
+    BUDDY_PACK_CLEAN,
+    BUDDY_PACK_STINKY,
+    BUDDY_PACK_POOP,
     BUDDY_PACK_STATE_COUNT,
 } buddy_pack_state_t;
 
@@ -102,8 +108,9 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
 uint32_t buddy_pack_total_size(const buddy_pack_info_t *info);
 
 /* The state whose clips play for a requested state. Empty states fall back:
- * eat and pat to heart, play to celebrate, refuse to dizzy, the rest to idle.
- * Empty mood states (hungry, sad, tired) have no fallback and return false. */
+ * eat, pat and clean to heart, play to celebrate, refuse to dizzy, the rest to
+ * idle. Empty mood states (hungry, sad, tired, stinky) and poop have no
+ * fallback and return false. */
 bool buddy_pack_resolve_state(const buddy_pack_info_t *info, buddy_pack_state_t state,
                               buddy_pack_state_t *resolved);
 

@@ -42,6 +42,9 @@ bool buddy_pack_parse_header(const uint8_t *data, size_t length, buddy_pack_info
     if (read_u16(data + 4) == 1U) {
         state_count = BUDDY_PACK_V1_STATE_COUNT;
         fixed_header = BUDDY_PACK_FIXED_HEADER_V1;
+    } else if (read_u16(data + 4) == 2U) {
+        state_count = BUDDY_PACK_V2_STATE_COUNT;
+        fixed_header = BUDDY_PACK_FIXED_HEADER_V2;
     } else if (read_u16(data + 4) == BUDDY_PACK_VERSION) {
         state_count = BUDDY_PACK_STATE_COUNT;
         fixed_header = BUDDY_PACK_FIXED_HEADER;
@@ -140,9 +143,12 @@ bool buddy_pack_resolve_state(const buddy_pack_info_t *info, buddy_pack_state_t 
     case BUDDY_PACK_HUNGRY:
     case BUDDY_PACK_SAD:
     case BUDDY_PACK_TIRED:
+    case BUDDY_PACK_STINKY:
+    case BUDDY_PACK_POOP:
         return false;
     case BUDDY_PACK_EAT:
     case BUDDY_PACK_PAT:
+    case BUDDY_PACK_CLEAN:
         fallback = BUDDY_PACK_HEART;
         break;
     case BUDDY_PACK_PLAY:

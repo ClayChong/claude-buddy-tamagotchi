@@ -28,7 +28,7 @@ static void put32(uint8_t *p, uint32_t v)
 }
 
 /* states[i] = {first_clip, clip_count}; returns total size. Version 1 packs carry
- * 7 states after the name, version 2 packs carry 14. */
+ * 7 states after the name, version 2 packs carry 14 and version 3 packs 17. */
 static size_t build_pack_version(uint8_t *out, uint16_t version, const uint16_t (*states)[2],
                                  unsigned state_count, const clip_spec_t *clips,
                                  uint16_t clip_count, uint16_t frame_count)
@@ -549,16 +549,18 @@ static void test_v2_pack_reads_fourteen_states(void)
     states[BUDDY_PACK_HEART][1] = 1;
     states[BUDDY_PACK_EAT][0] = 4;
     states[BUDDY_PACK_EAT][1] = 1;
-    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    size = build_pack_version(pack, 2, states, BUDDY_PACK_V2_STATE_COUNT, k_care_clips, 5, 5);
     assert(buddy_pack_parse_header(pack, size, &info));
     assert(info.version == 2);
     assert(info.header_size == 104U + 8U * 5U + 4U);
     assert(info.states[BUDDY_PACK_EAT].first_clip == 4);
     assert(info.states[BUDDY_PACK_EAT].clip_count == 1);
     assert(info.clips[4].frame_ms == 200);
+    assert(info.states[BUDDY_PACK_CLEAN].clip_count == 0);
+    assert(info.states[BUDDY_PACK_POOP].clip_count == 0);
 }
 
-static void test_version_3_rejected(void)
+static void test_v3_pack_reads_seventeen_states(void)
 {
     static uint8_t pack[1024];
     uint16_t states[BUDDY_PACK_STATE_COUNT][2] = {{0}};
@@ -566,7 +568,31 @@ static void test_version_3_rejected(void)
     size_t size;
 
     states[BUDDY_PACK_IDLE][1] = 1;
+    states[BUDDY_PACK_CLEAN][0] = 1;
+    states[BUDDY_PACK_CLEAN][1] = 1;
+    states[BUDDY_PACK_STINKY][0] = 2;
+    states[BUDDY_PACK_STINKY][1] = 1;
+    states[BUDDY_PACK_POOP][0] = 3;
+    states[BUDDY_PACK_POOP][1] = 2;
     size = build_pack_version(pack, 3, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    assert(buddy_pack_parse_header(pack, size, &info));
+    assert(info.version == 3);
+    assert(info.header_size == 116U + 8U * 5U + 4U);
+    assert(info.states[BUDDY_PACK_CLEAN].first_clip == 1);
+    assert(info.states[BUDDY_PACK_STINKY].first_clip == 2);
+    assert(info.states[BUDDY_PACK_POOP].first_clip == 3);
+    assert(info.states[BUDDY_PACK_POOP].clip_count == 2);
+}
+
+static void test_version_4_rejected(void)
+{
+    static uint8_t pack[1024];
+    uint16_t states[BUDDY_PACK_STATE_COUNT][2] = {{0}};
+    buddy_pack_info_t info;
+    size_t size;
+
+    states[BUDDY_PACK_IDLE][1] = 1;
+    size = build_pack_version(pack, 4, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
     assert(!buddy_pack_parse_header(pack, size, &info));
 }
 
@@ -587,7 +613,7 @@ static void test_resolve_fallbacks(void)
     states[BUDDY_PACK_CELEBRATE][1] = 1;
     states[BUDDY_PACK_DIZZY][0] = 3;
     states[BUDDY_PACK_DIZZY][1] = 1;
-    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    size = build_pack_version(pack, 3, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
     assert(buddy_pack_parse_header(pack, size, &info));
 
     assert(buddy_pack_resolve_state(&info, BUDDY_PACK_EAT, &r) && r == BUDDY_PACK_HEART);
@@ -601,9 +627,12 @@ static void test_resolve_fallbacks(void)
     assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_TIRED, &r));
     assert(buddy_pack_frame_at(&info, BUDDY_PACK_EAT, 0, &f) && f == 1);
     assert(!buddy_pack_frame_at(&info, BUDDY_PACK_HUNGRY, 0, &f));
+    assert(buddy_pack_resolve_state(&info, BUDDY_PACK_CLEAN, &r) && r == BUDDY_PACK_HEART);
+    assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_STINKY, &r));
+    assert(!buddy_pack_resolve_state(&info, BUDDY_PACK_POOP, &r));
 
     states[BUDDY_PACK_DIZZY][1] = 0;
-    size = build_pack_version(pack, 2, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
+    size = build_pack_version(pack, 3, states, BUDDY_PACK_STATE_COUNT, k_care_clips, 5, 5);
     assert(buddy_pack_parse_header(pack, size, &info));
     assert(buddy_pack_resolve_state(&info, BUDDY_PACK_REFUSE, &r) && r == BUDDY_PACK_IDLE);
 }
@@ -615,7 +644,8 @@ int main(void)
     test_frame_timing();
     test_v1_pack_leaves_new_states_empty();
     test_v2_pack_reads_fourteen_states();
-    test_version_3_rejected();
+    test_v3_pack_reads_seventeen_states();
+    test_version_4_rejected();
     test_resolve_fallbacks();
     test_upload_flow();
     test_upload_errors();
