@@ -81,3 +81,8 @@ add_executable(test_buddy_pack test_buddy_pack.c ../main/buddy_pack_format.c
 target_include_directories(test_buddy_pack PRIVATE test_shims ../main ${BUDDY_CJSON_DIR})
 target_compile_options(test_buddy_pack PRIVATE -Wall -Wextra -Werror)
 add_test(NAME buddy_pack COMMAND test_buddy_pack)
+
+add_executable(test_buddy_anim test_buddy_anim.c ../main/buddy_anim.c ../main/buddy_pack_format.c)
+target_include_directories(test_buddy_anim PRIVATE ../main)
+target_compile_options(test_buddy_anim PRIVATE -Wall -Wextra -Werror)
+add_test(NAME buddy_anim COMMAND test_buddy_anim)

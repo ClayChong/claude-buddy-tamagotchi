@@ -38,6 +38,14 @@ typedef enum {
 } buddy_character_t;
 
 typedef enum {
+    BUDDY_MOOD_NORMAL,
+    BUDDY_MOOD_HAPPY,
+    BUDDY_MOOD_HUNGRY,
+    BUDDY_MOOD_TIRED,
+    BUDDY_MOOD_SAD,
+} buddy_mood_t;
+
+typedef enum {
     BUDDY_PAGE_HOME,
     BUDDY_PAGE_STATUS = BUDDY_PAGE_HOME,
     BUDDY_PAGE_PET,

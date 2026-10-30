@@ -16,6 +16,7 @@ idf_component_register(
         "buddy_pack.c"
         "buddy_pack_format.c"
         "buddy_pack_xfer.c"
+        "buddy_anim.c"
     INCLUDE_DIRS "."
     REQUIRES bsp bt esp_hw_support esp_partition esp_timer json nvs_flash
 )
