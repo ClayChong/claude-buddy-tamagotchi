@@ -139,3 +139,21 @@ celebrate, refuse → dizzy. They have no mood idles.
 - On the device: specials appear between blinks; feeding, playing and patting each show their
   reaction; stats survive a power cycle; an OK press in the first second of a new prompt does
   not approve it.
+
+## Poop (added after the first release)
+
+- Claude busy time (the bridge reports `running > 0`) adds up across turns. Each 20 minutes
+  of it drops one poop the next time Claude is fully idle: nothing running and no prompt
+  waiting. Busy time is not saved across reboots.
+- The pile holds at most 4 poops. Busy time that would overflow a full pile is discarded.
+- Each uncleaned poop costs 1 extra happiness point per 1800 s, including offline catch-up.
+- Mood order becomes: hungry, stinky (any poop), tired, sad, happy, normal.
+- A double OK press on the home or pet page cleans the whole pile and plays the `clean`
+  reaction for 3000 ms. It gives no happiness. Without poop, a double press counts as one
+  click. A double OK never approves a prompt or confirms a reset, but still counts as an OK
+  press for the approval guard's quiet second.
+- The poop count is saved in bits 24–31 of the `pet` value.
+- Pack format version 3 adds `clean`, `stinky` and `poop` (17 states, 116-byte fixed header).
+  `clean` falls back to heart; `stinky` and `poop` have no fallback. Poop frames hold the
+  poop in their bottom-left quarter, which the device stacks in a column right of the buddy,
+  24 px apart. Without poop frames the device draws a built-in poop.
