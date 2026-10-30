@@ -138,9 +138,9 @@ bool buddy_pack_delete(void)
     return s_partition != NULL && buddy_pack_xfer_delete(&s_xfer);
 }
 
-bool buddy_pack_frame(buddy_pack_state_t state, uint64_t elapsed_ms, uint16_t *frame)
+const buddy_pack_info_t *buddy_pack_info(void)
 {
-    return s_mapped && buddy_pack_frame_at(&s_info, state, elapsed_ms, frame);
+    return s_mapped ? &s_info : NULL;
 }
 
 void buddy_pack_size(uint16_t *width, uint16_t *height)

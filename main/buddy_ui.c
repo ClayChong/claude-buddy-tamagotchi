@@ -4,10 +4,12 @@
 #include <string.h>
 #include <time.h>
 
+#include "buddy_anim.h"
 #include "buddy_i4.h"
 #include "buddy_pack.h"
 #include "buddy_sprite.h"
 #include "buddy_text_layout.h"
+#include "esp_random.h"
 #include "lvgl.h"
 
 #define UI_W 240
@@ -30,6 +32,7 @@ static buddy_ui_snapshot_t s_snapshot;
 static bool s_have_snapshot;
 static uint32_t s_tick;
 static uint32_t s_pack_frame = UINT32_MAX;
+static buddy_anim_t s_anim;
 static uint64_t s_elapsed_ms;
 static int s_scroll;
 static buddy_i4_surface_t s_surface;
@@ -194,6 +197,19 @@ static uint8_t art_state(buddy_character_t state)
     }
 }
 
+static buddy_pack_state_t pack_state(buddy_character_t state)
+{
+    return (buddy_pack_state_t)art_state(state);
+}
+
+/* The scheduler only moves with time, so asking twice at the same time gives
+ * the same frame. */
+static bool pack_frame(const buddy_ui_snapshot_t *s, uint16_t *frame)
+{
+    return buddy_anim_frame(&s_anim, buddy_pack_info(), pack_state(s->character),
+                            BUDDY_MOOD_NORMAL, s_elapsed_ms, frame);
+}
+
 static bool showing_pack(const buddy_ui_snapshot_t *s)
 {
     return s->species == BUDDY_SPECIES_PACK && buddy_pack_available();
@@ -212,7 +228,7 @@ static void draw_pack(const buddy_i4_clip_t *clip, const buddy_ui_snapshot_t *s)
     uint16_t height;
     int top = 52;
 
-    if (!buddy_pack_frame((buddy_pack_state_t)art_state(s->character), s_elapsed_ms, &frame)) {
+    if (!pack_frame(s, &frame)) {
         return;
     }
     buddy_pack_size(&width, &height);
@@ -446,6 +462,7 @@ void buddy_ui_init(void)
 {
     unsigned i;
     if (s_screen) return;
+    buddy_anim_init(&s_anim, esp_random());
     s_screen = lv_obj_create(NULL);
     lv_obj_set_size(s_screen, UI_W, UI_H);
     lv_obj_remove_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
@@ -486,9 +503,7 @@ void buddy_ui_tick(uint64_t elapsed_ms)
     if (tick != s_tick) {
         s_tick = tick;
         redraw();
-    } else if (s_have_snapshot && showing_pack(&s_snapshot) &&
-               buddy_pack_frame((buddy_pack_state_t)art_state(s_snapshot.character), elapsed_ms,
-                                &frame) &&
+    } else if (s_have_snapshot && showing_pack(&s_snapshot) && pack_frame(&s_snapshot, &frame) &&
                frame != s_pack_frame) {
         /* Pack clips can run faster than the 200 ms built-in animation tick. */
         redraw();

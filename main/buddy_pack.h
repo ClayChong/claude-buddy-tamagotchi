@@ -22,8 +22,8 @@ bool buddy_pack_transfer(const buddy_transfer_t *transfer, uint32_t *n, const ch
 void buddy_pack_abort(void);
 bool buddy_pack_delete(void);
 
-/* Frame to show for a state at elapsed_ms; false if no pack is mapped. */
-bool buddy_pack_frame(buddy_pack_state_t state, uint64_t elapsed_ms, uint16_t *frame);
+/* Header of the mapped pack, or NULL when no pack is available. */
+const buddy_pack_info_t *buddy_pack_info(void);
 void buddy_pack_size(uint16_t *width, uint16_t *height);
 void buddy_pack_draw(buddy_i4_surface_t *surface, const buddy_i4_clip_t *clip, uint16_t frame,
                      int x, int y);
