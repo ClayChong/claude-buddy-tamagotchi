@@ -23,6 +23,7 @@ typedef struct {
     esp_err_t (*factory_reset)(void *context);
     esp_err_t (*set_ble_enabled)(void *context, bool enabled);
     esp_err_t (*persist_level)(void *context, uint64_t level);
+    esp_err_t (*persist_pet)(void *context, uint64_t packed);
     /* Character upload; see buddy_pack_xfer.h. */
     bool (*transfer)(void *context, const buddy_transfer_t *transfer, uint32_t *n,
                      const char **error);

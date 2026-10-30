@@ -134,6 +134,7 @@ typedef enum {
     BUDDY_ACTION_DISPLAY_BACKLIGHT,
     BUDDY_ACTION_SCREEN_OFF,
     BUDDY_ACTION_DELETE_CHARACTER,
+    BUDDY_ACTION_PET_SAVE,
 } buddy_action_type_t;
 
 typedef enum {
@@ -193,6 +194,8 @@ typedef struct {
     uint64_t approval_count;
     uint64_t denial_count;
     uint64_t highest_celebrated_level;
+    /* Packed pet stats (see buddy_pet_pack); 0 when none are stored. */
+    uint64_t pet;
     bool ble_enabled;
 } buddy_settings_snapshot_t;
 
@@ -240,6 +243,7 @@ typedef struct {
     buddy_settings_snapshot_t settings;
     char message[BUDDY_MESSAGE_MAX];
     int scroll_delta;
+    uint64_t pet;
     uint8_t brightness_percent;
     uint32_t connection_generation;
     bool ble_enabled;

@@ -771,6 +771,12 @@ static esp_err_t buddy_orchestrator_persist_level(void *context, uint64_t level)
     return buddy_settings_set_highest_celebrated_level(level);
 }
 
+static esp_err_t buddy_orchestrator_persist_pet(void *context, uint64_t packed)
+{
+    (void)context;
+    return buddy_settings_set_pet(packed);
+}
+
 static bool buddy_orchestrator_transfer(void *context, const buddy_transfer_t *transfer,
                                         uint32_t *n, const char **error)
 {
@@ -798,6 +804,7 @@ static buddy_orchestrator_ops_t buddy_orchestrator_ops(buddy_state_t *state)
         .factory_reset = buddy_orchestrator_factory_reset,
         .set_ble_enabled = buddy_orchestrator_set_ble,
         .persist_level = buddy_orchestrator_persist_level,
+        .persist_pet = buddy_orchestrator_persist_pet,
         .transfer = buddy_orchestrator_transfer,
         .delete_pack = buddy_orchestrator_delete_pack,
     };

@@ -17,6 +17,7 @@
 #define BUDDY_SETTINGS_DIRTY_APPROVE (1U << 3)
 #define BUDDY_SETTINGS_DIRTY_DENY (1U << 4)
 #define BUDDY_SETTINGS_DIRTY_LEVEL (1U << 5)
+#define BUDDY_SETTINGS_DIRTY_PET (1U << 6)
 
 typedef struct {
     esp_err_t (*get_str)(void *context, const char *key, char *value, size_t *length);
@@ -236,6 +237,10 @@ static esp_err_t buddy_settings_stage(const buddy_settings_snapshot_t *settings,
                                  settings->highest_celebrated_level);
         if (err != ESP_OK) return err;
     }
+    if ((dirty & BUDDY_SETTINGS_DIRTY_PET) != 0U) {
+        err = s_backend->set_u64(s_backend_context, "pet", settings->pet);
+        if (err != ESP_OK) return err;
+    }
     return ESP_OK;
 }
 
@@ -376,6 +381,12 @@ esp_err_t buddy_settings_load(buddy_settings_snapshot_t *snapshot)
         } else if (err != ESP_ERR_NVS_NOT_FOUND) {
             return err;
         }
+        err = s_backend->get_u64(s_backend_context, "pet", &value);
+        if (err == ESP_OK) {
+            loaded.pet = value;
+        } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+            return err;
+        }
         s_settings = loaded;
         s_loaded = true;
     }
@@ -446,6 +457,19 @@ esp_err_t buddy_settings_set_highest_celebrated_level(uint64_t level)
     }
     s_settings.highest_celebrated_level = level;
     s_dirty |= BUDDY_SETTINGS_DIRTY_LEVEL;
+    return ESP_OK;
+}
+
+esp_err_t buddy_settings_set_pet(uint64_t packed)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (buddy_settings_ensure_loaded() != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_settings.pet = packed;
+    s_dirty |= BUDDY_SETTINGS_DIRTY_PET;
     return ESP_OK;
 }
 

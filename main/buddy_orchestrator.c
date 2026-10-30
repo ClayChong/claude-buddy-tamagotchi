@@ -189,6 +189,9 @@ bool buddy_orchestrator_execute_action(buddy_state_t *state,
         return ops->persist_level != NULL &&
                ops->persist_level(ops->context,
                                   action->settings.highest_celebrated_level) == ESP_OK;
+    case BUDDY_ACTION_PET_SAVE:
+        return ops->persist_pet != NULL &&
+               ops->persist_pet(ops->context, action->pet) == ESP_OK;
     case BUDDY_ACTION_STATUS: {
         buddy_status_report_t report;
 

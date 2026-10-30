@@ -1042,6 +1042,88 @@ static void test_approval_raises_happiness(void)
     assert(state.pet.happiness == 83);
 }
 
+static buddy_settings_snapshot_t test_settings_with_pet(uint8_t fullness, uint8_t happiness,
+                                                        uint8_t energy, uint32_t epoch)
+{
+    buddy_settings_snapshot_t settings = {0};
+    buddy_pet_t pet;
+
+    buddy_pet_init(&pet);
+    pet.fullness = fullness;
+    pet.happiness = happiness;
+    pet.energy = energy;
+    settings.pet = buddy_pet_pack(&pet, epoch);
+    return settings;
+}
+
+static void test_state_loads_saved_pet(void)
+{
+    buddy_settings_snapshot_t settings = test_settings_with_pet(12, 34, 56, 0);
+    buddy_settings_snapshot_t empty = {0};
+    buddy_state_t state;
+
+    buddy_state_init(&state, &settings);
+    assert(state.pet.fullness == 12 && state.pet.happiness == 34 && state.pet.energy == 56);
+    buddy_state_init(&state, &empty);
+    assert(state.pet.fullness == 80 && state.pet.happiness == 80 && state.pet.energy == 80);
+}
+
+static void test_catch_up_once_and_never_negative(void)
+{
+    const uint32_t saved = (uint32_t)(TEST_MIDNIGHT + 12 * 3600);
+    buddy_settings_snapshot_t settings = test_settings_with_pet(80, 80, 50, saved);
+    buddy_state_t state;
+    buddy_event_t time = test_time_event((int64_t)saved + 3610);
+
+    buddy_state_init(&state, &settings);
+    buddy_state_reduce(&state, &time, 10000, NULL);
+    assert(state.pet.energy == 80);
+    time = test_time_event((int64_t)saved + 3620);
+    buddy_state_reduce(&state, &time, 20000, NULL);
+    assert(state.pet.energy == 80);
+
+    settings = test_settings_with_pet(80, 80, 50, saved + 100000U);
+    buddy_state_init(&state, &settings);
+    time = test_time_event((int64_t)saved + 3610);
+    buddy_state_reduce(&state, &time, 10000, NULL);
+    assert(state.pet.energy == 50);
+}
+
+static void test_catch_up_capped_at_one_day(void)
+{
+    const uint32_t saved = (uint32_t)TEST_MIDNIGHT;
+    buddy_settings_snapshot_t settings = test_settings_with_pet(100, 100, 50, saved);
+    buddy_state_t state;
+    buddy_event_t time = test_time_event((int64_t)saved + 10 * 86400 + 500);
+
+    buddy_state_init(&state, &settings);
+    buddy_state_reduce(&state, &time, 0, NULL);
+    /* Every stat saturates within a day, so the cap shows only in the leftover
+     * seconds: 86400 is a whole number of fullness periods, 864500 is not. */
+    assert(state.pet.fullness == 0);
+    assert(state.pet.fullness_carry_s == 0);
+}
+
+static void test_periodic_pet_save(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+    buddy_event_t time = test_time_event(TEST_MIDNIGHT);
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &tick, 599999, &action);
+    assert(action.type != BUDDY_ACTION_PET_SAVE);
+    buddy_state_reduce(&state, &tick, 600000, &action);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    assert(action.pet == buddy_pet_pack(&state.pet, 0));
+
+    buddy_state_reduce(&state, &time, 601000, &action);
+    buddy_state_reduce(&state, &tick, 1200000, &action);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    assert(action.pet == buddy_pet_pack(&state.pet, (uint32_t)TEST_MIDNIGHT + 599U));
+}
+
 int main(void)
 {
     test_offline_initialization();
@@ -1051,6 +1133,10 @@ int main(void)
     test_night_counts_as_sleep();
     test_waiting_prompt_lowers_happiness();
     test_approval_raises_happiness();
+    test_state_loads_saved_pet();
+    test_catch_up_once_and_never_negative();
+    test_catch_up_capped_at_one_day();
+    test_periodic_pet_save();
     test_heartbeat_mapping();
     test_character_priority();
     test_timeout_clears_prompt();

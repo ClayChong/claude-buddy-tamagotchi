@@ -10,6 +10,8 @@
 #define BUDDY_APPROVAL_HAPPINESS 3
 #define BUDDY_NIGHT_START_HOUR 23
 #define BUDDY_NIGHT_END_HOUR 7
+#define BUDDY_PET_SAVE_INTERVAL_MS 600000ULL
+#define BUDDY_PET_CATCH_UP_MAX_S 86400U
 #define BUDDY_TOKEN_CELEBRATION_STEP 50000
 
 static void buddy_copy(char *destination, size_t destination_size, const char *source)
@@ -537,6 +539,46 @@ static void buddy_update_pet(buddy_state_t *state, uint64_t now_ms)
     }
 }
 
+/* Synced UTC epoch now, or 0 before the first time sync. */
+static uint32_t buddy_current_epoch(const buddy_state_t *state, uint64_t now_ms)
+{
+    int64_t epoch;
+
+    if (state->epoch_seconds <= 0 || now_ms < state->time_received_ms) {
+        return 0;
+    }
+    epoch = state->epoch_seconds + (int64_t)((now_ms - state->time_received_ms) / 1000U);
+    return epoch > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)epoch;
+}
+
+static void buddy_pet_save_action(buddy_state_t *state, uint64_t now_ms, buddy_action_t *action)
+{
+    state->pet_saved_ms = now_ms;
+    if (action != NULL) {
+        action->type = BUDDY_ACTION_PET_SAVE;
+        action->pet = buddy_pet_pack(&state->pet, buddy_current_epoch(state, now_ms));
+    }
+}
+
+/* Time spent switched off counts as sleep, once per boot, capped at a day. */
+static void buddy_pet_catch_up(buddy_state_t *state, uint64_t now_ms)
+{
+    int64_t boot_epoch = state->epoch_seconds - (int64_t)(now_ms / 1000U);
+    int64_t gap = boot_epoch - (int64_t)state->pet_saved_epoch;
+
+    if (state->pet_catch_up_done || state->epoch_seconds <= 0) {
+        return;
+    }
+    state->pet_catch_up_done = true;
+    if (state->pet_saved_epoch == 0U || gap <= 0) {
+        return;
+    }
+    buddy_pet_elapse(&state->pet,
+                     gap > (int64_t)BUDDY_PET_CATCH_UP_MAX_S ? BUDDY_PET_CATCH_UP_MAX_S
+                                                            : (uint32_t)gap,
+                     BUDDY_PET_SLEEPING);
+}
+
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings)
 {
     if (state == NULL) {
@@ -550,6 +592,10 @@ void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *set
     state->brightness_level = 4;
     state->transcript_enabled = true;
     buddy_pet_init(&state->pet);
+    if (settings != NULL && settings->pet != 0U &&
+        !buddy_pet_unpack(settings->pet, &state->pet, &state->pet_saved_epoch)) {
+        buddy_pet_init(&state->pet);
+    }
     if (settings != NULL) {
         state->settings = *settings;
         state->highest_celebrated_level = settings->highest_celebrated_level;
@@ -585,6 +631,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         state->epoch_seconds = event->time.epoch_seconds;
         state->timezone_offset_seconds = event->time.timezone_offset_seconds;
         state->time_received_ms = now_ms;
+        buddy_pet_catch_up(state, now_ms);
         buddy_set_ui_refresh(action);
         break;
     case BUDDY_EVENT_NAME:
@@ -735,6 +782,9 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         break;
     case BUDDY_EVENT_TICK:
         buddy_set_ui_refresh(action);
+        if (now_ms - state->pet_saved_ms >= BUDDY_PET_SAVE_INTERVAL_MS) {
+            buddy_pet_save_action(state, now_ms, action);
+        }
         break;
     case BUDDY_EVENT_NONE:
         break;

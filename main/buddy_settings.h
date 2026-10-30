@@ -16,6 +16,7 @@ esp_err_t buddy_settings_set_name_committed(const char *name);
 esp_err_t buddy_settings_set_owner_committed(const char *owner);
 esp_err_t buddy_settings_set_ble_enabled(bool enabled);
 esp_err_t buddy_settings_set_highest_celebrated_level(uint64_t level);
+esp_err_t buddy_settings_set_pet(uint64_t packed);
 void buddy_settings_record_permission(buddy_permission_decision_t decision);
 esp_err_t buddy_settings_flush(bool force);
 esp_err_t buddy_settings_factory_reset(void);

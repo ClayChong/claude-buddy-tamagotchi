@@ -62,6 +62,9 @@ typedef struct {
     uint64_t pet_updated_ms;
     uint64_t prompt_shown_ms;
     uint32_t prompt_penalties;
+    uint64_t pet_saved_ms;
+    uint32_t pet_saved_epoch;
+    bool pet_catch_up_done;
 } buddy_state_t;
 
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings);

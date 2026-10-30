@@ -11,12 +11,14 @@ typedef struct {
     uint64_t approvals;
     uint64_t denials;
     uint64_t level;
+    uint64_t pet;
     bool has_name;
     bool has_owner;
     bool has_ble;
     bool has_approvals;
     bool has_denials;
     bool has_level;
+    bool has_pet;
     esp_err_t get_str_error;
     esp_err_t get_u8_error;
     esp_err_t get_u64_error;
@@ -117,6 +119,9 @@ static esp_err_t fake_get_u64(void *context, const char *key, uint64_t *value)
     } else if (strcmp(key, "level") == 0) {
         *value = storage->level;
         present = storage->has_level;
+    } else if (strcmp(key, "pet") == 0) {
+        *value = storage->pet;
+        present = storage->has_pet;
     }
     return present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
 }
@@ -134,6 +139,9 @@ static esp_err_t fake_set_u64(void *context, const char *key, uint64_t value)
     } else if (strcmp(key, "level") == 0) {
         storage->level = value;
         storage->has_level = true;
+    } else if (strcmp(key, "pet") == 0) {
+        storage->pet = value;
+        storage->has_pet = true;
     } else {
         return ESP_ERR_INVALID_ARG;
     }
@@ -152,6 +160,7 @@ static esp_err_t fake_erase_all(void *context)
     storage->has_approvals = false;
     storage->has_denials = false;
     storage->has_level = false;
+    storage->has_pet = false;
     ++storage->erase_count;
     return ESP_OK;
 }
@@ -384,6 +393,39 @@ static void test_factory_reset_only_erases_buddy_backend(void)
     assert(snapshot.ble_enabled);
 }
 
+static void test_pet_round_trip(void)
+{
+    fake_storage_t storage;
+    buddy_settings_snapshot_t snapshot;
+    const uint64_t packed = ((uint64_t)1767225600U << 32) | 0x382212U;
+
+    test_setup(&storage);
+    assert(buddy_settings_load(&snapshot) == ESP_OK);
+    assert(snapshot.pet == 0);
+    assert(buddy_settings_set_pet(packed) == ESP_OK);
+    assert(buddy_settings_flush(true) == ESP_OK);
+    assert(storage.has_pet && storage.pet == packed);
+
+    buddy_settings_test_set_backend(&fake_backend, &storage);
+    assert(buddy_settings_init() == ESP_OK);
+    assert(buddy_settings_load(&snapshot) == ESP_OK);
+    assert(snapshot.pet == packed);
+}
+
+static void test_factory_reset_clears_pet(void)
+{
+    fake_storage_t storage;
+    buddy_settings_snapshot_t snapshot;
+
+    test_setup(&storage);
+    assert(buddy_settings_set_pet(0x505050U) == ESP_OK);
+    assert(buddy_settings_flush(true) == ESP_OK);
+    assert(buddy_settings_factory_reset() == ESP_OK);
+    assert(buddy_settings_load(&snapshot) == ESP_OK);
+    assert(snapshot.pet == 0);
+    assert(!storage.has_pet);
+}
+
 int main(void)
 {
     test_rapid_permissions_only_commit_on_forced_flush();
@@ -396,6 +438,8 @@ int main(void)
     test_ble_read_failure_does_not_activate_defaults();
     test_counter_read_failure_does_not_activate_defaults();
     test_factory_reset_only_erases_buddy_backend();
+    test_pet_round_trip();
+    test_factory_reset_clears_pet();
     puts("buddy settings tests passed");
     return 0;
 }

@@ -12,6 +12,7 @@ typedef struct {
     bool secure;
     unsigned permissions_recorded;
     bool ble_enabled;
+    uint64_t pet;
 } fake_runtime_t;
 
 static void record(fake_runtime_t *fake, char operation)
@@ -109,6 +110,15 @@ static esp_err_t fake_persist_level(void *context, uint64_t level)
     return ESP_OK;
 }
 
+static esp_err_t fake_persist_pet(void *context, uint64_t packed)
+{
+    fake_runtime_t *fake = context;
+
+    record(fake, 'E');
+    fake->pet = packed;
+    return ESP_OK;
+}
+
 static buddy_orchestrator_ops_t fake_ops(fake_runtime_t *fake)
 {
     const buddy_orchestrator_ops_t ops = {
@@ -123,6 +133,7 @@ static buddy_orchestrator_ops_t fake_ops(fake_runtime_t *fake)
         .factory_reset = fake_factory_reset,
         .set_ble_enabled = fake_set_ble,
         .persist_level = fake_persist_level,
+        .persist_pet = fake_persist_pet,
     };
     return ops;
 }
@@ -218,11 +229,26 @@ static void test_executor_orders_sensitive_side_effects(void)
     assert(!fake.ble_enabled);
 }
 
+static void test_pet_save_persists_packed_pet(void)
+{
+    fake_runtime_t fake = {.commit_result = ESP_OK, .secure = true};
+    buddy_orchestrator_ops_t ops = fake_ops(&fake);
+    buddy_state_t state;
+    buddy_action_t action = {.type = BUDDY_ACTION_PET_SAVE, .pet = 0x1234505050ULL};
+    buddy_event_t result;
+
+    buddy_state_init(&state, NULL);
+    assert(buddy_orchestrator_execute_action(&state, &ops, &action, &result));
+    assert(strcmp(fake.order, "E") == 0);
+    assert(fake.pet == 0x1234505050ULL);
+}
+
 int main(void)
 {
     test_official_rx_fixtures_reach_state_and_responses();
     test_failed_setting_commit_sends_error_ack_without_state_change();
     test_executor_orders_sensitive_side_effects();
+    test_pet_save_persists_packed_pet();
     puts("buddy orchestrator tests passed");
     return 0;
 }
