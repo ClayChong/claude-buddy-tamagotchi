@@ -565,7 +565,7 @@ static void buddy_reset_transient_state(buddy_state_t *state, const char *messag
     if (settings.name[0] == '\0') {
         buddy_default_name(settings.name);
     }
-    buddy_state_init(state, &settings);
+    buddy_state_reinit_keep_pet(state, &settings);
     buddy_state_set_pack(state, buddy_pack_available(), true);
     state->battery_available = battery_available;
     state->battery_percent = battery_percent;

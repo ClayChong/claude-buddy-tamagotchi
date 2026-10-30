@@ -1115,6 +1115,7 @@ static void test_periodic_pet_save(void)
     buddy_event_t time = test_time_event(TEST_MIDNIGHT);
 
     buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &tick, 0, &action);
     buddy_state_reduce(&state, &tick, 599999, &action);
     assert(action.type != BUDDY_ACTION_PET_SAVE);
     buddy_state_reduce(&state, &tick, 600000, &action);
@@ -1177,6 +1178,7 @@ static void test_feed_refused(void)
     buddy_event_t up = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_UP};
     buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
     buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+    buddy_ui_snapshot_t snapshot;
 
     buddy_state_init(&state, NULL);
     state.pet.fullness = 95;
@@ -1184,11 +1186,15 @@ static void test_feed_refused(void)
     buddy_state_reduce(&state, &ok, 1000, &action);
     assert(state.pet.fullness == 95);
     assert(state.character == BUDDY_CHARACTER_REFUSE);
-    assert(strcmp(state.message, "Not hungry") == 0);
+    assert(state.message[0] == '\0');
+    buddy_state_snapshot(&state, &snapshot);
+    assert(strcmp(snapshot.care_message, "Not hungry") == 0);
     buddy_state_reduce(&state, &tick, 3999, &action);
     assert(state.character == BUDDY_CHARACTER_REFUSE);
     buddy_state_reduce(&state, &tick, 4000, &action);
     assert(state.character != BUDDY_CHARACTER_REFUSE);
+    buddy_state_snapshot(&state, &snapshot);
+    assert(snapshot.care_message[0] == '\0');
 }
 
 static void test_pat_burst_dizzy(void)
@@ -1228,7 +1234,86 @@ static void test_ok_during_guard_is_ignored(void)
     assert(action.type == BUDDY_ACTION_NONE);
     assert(state.pet.happiness == 80);
     assert(!state.approval_locked);
+    /* The ignored press restarts the quiet second, so 2000 is too early. */
     buddy_state_reduce(&state, &ok, 2000, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
+    buddy_state_reduce(&state, &ok, 3000, &action);
+    assert(action.type == BUDDY_ACTION_PERMISSION);
+}
+
+static void test_pet_clock_starts_on_first_event(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    /* Re-initialised after 10 h of uptime, as unpair and factory reset do. */
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &tick, 36000000, &action);
+    assert(state.pet.fullness == 80 && state.pet.happiness == 80 && state.pet.energy == 80);
+    assert(action.type != BUDDY_ACTION_PET_SAVE);
+    buddy_state_reduce(&state, &tick, 36000000 + 600000, &action);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+}
+
+static void test_reinit_keeps_live_pet(void)
+{
+    buddy_settings_snapshot_t older = test_settings_with_pet(90, 90, 90, 0);
+    buddy_state_t state;
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &tick, 36000000, NULL);
+    state.pet.fullness = 12;
+    state.pet.happiness = 34;
+    state.pet.energy = 56;
+    state.pet_catch_up_done = true;
+    buddy_state_reinit_keep_pet(&state, &older);
+    buddy_state_reduce(&state, &tick, 36001000, NULL);
+    assert(state.pet.fullness == 12 && state.pet.happiness == 34 && state.pet.energy == 56);
+    assert(state.pet_catch_up_done);
+}
+
+static void test_wake_restarts_approval_guard(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+
+    buddy_state_init(&state, NULL);
+    state.screen_off = true;
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &prompt, 1000, NULL);
+    buddy_state_reduce(&state, &ok, 5000, &action);
+    assert(!state.screen_off);
+    buddy_state_reduce(&state, &ok, 5200, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
+    buddy_state_reduce(&state, &ok, 6200, &action);
+    assert(action.type == BUDDY_ACTION_PERMISSION);
+}
+
+static void test_ok_burst_never_approves(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+    uint64_t t;
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &ok, 1800, NULL);
+    buddy_state_reduce(&state, &prompt, 2000, NULL);
+    for (t = 2200; t <= 5000; t += 400) {
+        buddy_state_reduce(&state, &ok, t, &action);
+        assert(action.type != BUDDY_ACTION_PERMISSION);
+    }
+    buddy_state_reduce(&state, &ok, 5999, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
+    buddy_state_reduce(&state, &ok, 7000, &action);
     assert(action.type == BUDDY_ACTION_PERMISSION);
 }
 
@@ -1250,6 +1335,10 @@ int main(void)
     test_feed_refused();
     test_pat_burst_dizzy();
     test_ok_during_guard_is_ignored();
+    test_pet_clock_starts_on_first_event();
+    test_reinit_keeps_live_pet();
+    test_wake_restarts_approval_guard();
+    test_ok_burst_never_approves();
     test_heartbeat_mapping();
     test_character_priority();
     test_timeout_clears_prompt();

@@ -337,8 +337,12 @@ static void draw_pet(lv_layer_t *layer, const buddy_ui_snapshot_t *s)
     draw_buddy(layer, s, true);
     rule(layer, 12, BUDDY_UI_INFO_Y, 216, COL_LINE);
     text(layer, 16, 172, 62, COL_DIM, "MOOD", false, LV_TEXT_ALIGN_LEFT);
-    text(layer, 84, 172, 96, mood_color(s->mood), buddy_mood_name(s->mood), false,
-         LV_TEXT_ALIGN_LEFT);
+    if (s->care_message[0] != '\0') {
+        text(layer, 84, 172, 96, COL_ORANGE, s->care_message, false, LV_TEXT_ALIGN_LEFT);
+    } else {
+        text(layer, 84, 172, 96, mood_color(s->mood), buddy_mood_name(s->mood), false,
+             LV_TEXT_ALIGN_LEFT);
+    }
     snprintf(value, sizeof(value), "LV %llu", (unsigned long long)level);
     box(layer, 184, 166, 42, 19, COL_ORANGE, COL_ORANGE, 0, 3);
     text(layer, 186, 171, 38, COL_BG, value, false, LV_TEXT_ALIGN_CENTER);

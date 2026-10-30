@@ -302,7 +302,8 @@ static void buddy_care(buddy_state_t *state, buddy_care_t care, uint64_t now_ms,
             buddy_react(state, BUDDY_CHARACTER_EAT, now_ms);
         } else {
             buddy_react(state, BUDDY_CHARACTER_REFUSE, now_ms);
-            buddy_copy(state->message, sizeof(state->message), "Not hungry");
+            buddy_copy(state->care_message, sizeof(state->care_message), "Not hungry");
+            state->care_message_until_ms = now_ms + BUDDY_REACTION_MS;
         }
         break;
     case BUDDY_CARE_PLAY:
@@ -396,6 +397,7 @@ static void buddy_note_prompt_shown(buddy_state_t *state, const buddy_prompt_t *
     if (!buddy_prompt_ids_match(&state->prompt, prompt)) {
         state->prompt_shown_ms = now_ms;
         state->prompt_penalties = 0;
+        state->prompt_visible = false;
     }
 }
 
@@ -580,8 +582,12 @@ static void buddy_update_pet(buddy_state_t *state, uint64_t now_ms)
 {
     uint64_t seconds;
 
-    if (now_ms < state->pet_updated_ms) {
+    /* now_ms counts from boot, so a state initialised later (unpair, factory
+     * reset) starts its pet clock at its first event. */
+    if (!state->pet_clock_started || now_ms < state->pet_updated_ms) {
+        state->pet_clock_started = true;
         state->pet_updated_ms = now_ms;
+        state->pet_saved_ms = now_ms;
     }
     seconds = (now_ms - state->pet_updated_ms) / 1000U;
     if (seconds > 0) {
@@ -665,6 +671,48 @@ void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *set
         buddy_copy(state->owner, sizeof(state->owner), settings->owner);
     }
     buddy_refresh_character(state, 0);
+}
+
+void buddy_state_reinit_keep_pet(buddy_state_t *state, const buddy_settings_snapshot_t *settings)
+{
+    buddy_pet_t pet;
+    uint64_t updated_ms;
+    uint64_t saved_ms;
+    uint32_t saved_epoch;
+    bool clock_started;
+    bool catch_up_done;
+
+    if (state == NULL) {
+        return;
+    }
+    pet = state->pet;
+    updated_ms = state->pet_updated_ms;
+    saved_ms = state->pet_saved_ms;
+    saved_epoch = state->pet_saved_epoch;
+    clock_started = state->pet_clock_started;
+    catch_up_done = state->pet_catch_up_done;
+    buddy_state_init(state, settings);
+    state->pet = pet;
+    state->pet_updated_ms = updated_ms;
+    state->pet_saved_ms = saved_ms;
+    state->pet_saved_epoch = saved_epoch;
+    state->pet_clock_started = clock_started;
+    state->pet_catch_up_done = catch_up_done;
+    buddy_refresh_character(state, 0);
+}
+
+/* The approval guard counts from when the prompt became visible: a hidden
+ * prompt (screen off, confirmation or passkey on top) restarts it. */
+static void buddy_update_prompt_visibility(buddy_state_t *state, uint64_t now_ms)
+{
+    bool visible = buddy_has_actionable_prompt(state) && !state->screen_off &&
+                   !state->confirmation_pending && state->confirmation == BUDDY_CONFIRM_NONE &&
+                   !state->passkey_visible;
+
+    if (visible && !state->prompt_visible) {
+        state->prompt_visible_ms = now_ms;
+    }
+    state->prompt_visible = visible;
 }
 
 void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
@@ -787,7 +835,15 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
     case BUDDY_EVENT_PERMISSION_SEND_RESULT:
         buddy_apply_permission_result(state, &event->permission_result, now_ms, action);
         break;
-    case BUDDY_EVENT_KEY_CLICK:
+    case BUDDY_EVENT_KEY_CLICK: {
+        /* A run of OK presses (pats) never approves: OK needs a second of quiet. */
+        bool ok_quiet = !state->has_last_ok ||
+                        now_ms >= state->last_ok_ms + BUDDY_APPROVAL_GUARD_MS;
+
+        if (event->key == BUDDY_KEY_OK) {
+            state->has_last_ok = true;
+            state->last_ok_ms = now_ms;
+        }
         if (state->screen_off) {
             state->screen_off = false;
             if (action != NULL) {
@@ -821,8 +877,10 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
             break;
         }
         if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_OK) {
-            /* A press in the prompt's first second was meant for something else. */
-            if (now_ms >= state->prompt_shown_ms + BUDDY_APPROVAL_GUARD_MS) {
+            /* A press in the prompt's first visible second was meant for
+             * something else. */
+            if (state->prompt_visible && ok_quiet &&
+                now_ms >= state->prompt_visible_ms + BUDDY_APPROVAL_GUARD_MS) {
                 buddy_decide_prompt(state, event, BUDDY_PERMISSION_ONCE, action);
             }
         } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_DOWN) {
@@ -836,6 +894,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
             buddy_normal_click(state, event->key, now_ms, action);
         }
         break;
+    }
     case BUDDY_EVENT_KEY_LONG:
         if (event->key == BUDDY_KEY_OK && state->confirmation == BUDDY_CONFIRM_NONE &&
             !buddy_has_prompt(state)) {
@@ -847,6 +906,9 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         break;
     case BUDDY_EVENT_TICK:
         buddy_set_ui_refresh(action);
+        if (state->care_message[0] != '\0' && now_ms >= state->care_message_until_ms) {
+            state->care_message[0] = '\0';
+        }
         if (now_ms - state->pet_saved_ms >= BUDDY_PET_SAVE_INTERVAL_MS) {
             buddy_pet_save_action(state, now_ms, action);
         }
@@ -855,6 +917,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         break;
     }
 
+    buddy_update_prompt_visibility(state, now_ms);
     buddy_refresh_character(state, now_ms);
 }
 
@@ -908,6 +971,7 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     snapshot->pet_happiness = state->pet.happiness;
     snapshot->pet_energy = state->pet.energy;
     snapshot->mood = buddy_pet_mood(&state->pet);
+    buddy_copy(snapshot->care_message, sizeof(snapshot->care_message), state->care_message);
     buddy_copy(snapshot->name, sizeof(snapshot->name), state->name);
     buddy_copy(snapshot->owner, sizeof(snapshot->owner), state->owner);
     buddy_copy(snapshot->time, sizeof(snapshot->time), state->time);

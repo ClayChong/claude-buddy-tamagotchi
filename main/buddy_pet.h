@@ -31,8 +31,9 @@ typedef struct {
     uint8_t energy;
     uint32_t fullness_carry_s;
     uint32_t happiness_carry_s;
-    uint32_t energy_carry_s;
-    buddy_pet_activity_t energy_activity;
+    /* Energy drain in units of 1/1800 point: busy +6/s, awake +1/s, sleeping
+     * -15/s, so short spells of each activity still add up. */
+    int32_t energy_units;
 } buddy_pet_t;
 
 void buddy_pet_init(buddy_pet_t *pet);

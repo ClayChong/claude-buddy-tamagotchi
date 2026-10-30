@@ -14,6 +14,7 @@
 #define BUDDY_COMMAND_MAX 32
 #define BUDDY_HINT_MAX 320
 #define BUDDY_JSON_LINE_MAX 4096
+#define BUDDY_CARE_MESSAGE_MAX 24
 /* Species 0-17 are the built-in pixel pets; 18 is an uploaded character pack. */
 #define BUDDY_SPECIES_BUILTIN_COUNT 18U
 #define BUDDY_SPECIES_PACK BUDDY_SPECIES_BUILTIN_COUNT
@@ -312,4 +313,5 @@ typedef struct {
     uint8_t pet_happiness;
     uint8_t pet_energy;
     buddy_mood_t mood;
+    char care_message[BUDDY_CARE_MESSAGE_MAX];
 } buddy_ui_snapshot_t;

@@ -107,8 +107,10 @@ bool buddy_anim_frame(buddy_anim_t *anim, const buddy_pack_info_t *info, buddy_p
         info->states[BUDDY_PACK_IDLE].clip_count == 0U) {
         return false;
     }
+    /* A re-uploaded pack can keep its payload CRC but have fewer clips. */
     if (!anim->playing || anim->state != state || anim->pack_crc != info->payload_crc ||
-        now_ms < anim->started_ms) {
+        now_ms < anim->started_ms ||
+        anim->clip >= info->states[anim->clip_state].clip_count) {
         buddy_anim_restart(anim, info, state, now_ms);
     }
     if (state != BUDDY_PACK_IDLE) {

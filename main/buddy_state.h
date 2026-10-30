@@ -67,9 +67,19 @@ typedef struct {
     bool pet_catch_up_done;
     uint64_t pat_ms[4];
     uint8_t pat_count;
+    bool pet_clock_started;
+    bool prompt_visible;
+    uint64_t prompt_visible_ms;
+    bool has_last_ok;
+    uint64_t last_ok_ms;
+    char care_message[BUDDY_CARE_MESSAGE_MAX];
+    uint64_t care_message_until_ms;
 } buddy_state_t;
 
 void buddy_state_init(buddy_state_t *state, const buddy_settings_snapshot_t *settings);
+/* buddy_state_init() that keeps the running pet, its clocks and catch-up
+ * status, for resets that should not touch the pet (unpair). */
+void buddy_state_reinit_keep_pet(buddy_state_t *state, const buddy_settings_snapshot_t *settings);
 void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
                         uint64_t now_ms, buddy_action_t *action);
 void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snapshot);

@@ -160,6 +160,27 @@ static void test_pack_change_restarts(void)
     assert(frame == 1 && frame < info.frame_count);
 }
 
+static void test_clip_table_change_with_same_crc(void)
+{
+    buddy_pack_info_t info;
+    buddy_anim_t anim;
+    uint16_t frame = 0;
+    uint64_t now = 1;
+
+    make_info(&info, 4, false);
+    buddy_anim_init(&anim, 3);
+    while (anim.clip != 3U) {
+        assert(buddy_anim_frame(&anim, &info, BUDDY_PACK_IDLE, BUDDY_MOOD_NORMAL, now, &frame));
+        now += CLIP_MS;
+        assert(now < 1000U * CLIP_MS);
+    }
+    /* Clip 3 started at now - CLIP_MS; ask again halfway through it. */
+    info.states[BUDDY_PACK_IDLE].clip_count = 1;
+    assert(buddy_anim_frame(&anim, &info, BUDDY_PACK_IDLE, BUDDY_MOOD_NORMAL,
+                            now - CLIP_MS + 600U, &frame));
+    assert(frame < 4U);
+}
+
 static void test_long_gap_returns_quickly(void)
 {
     buddy_pack_info_t info;
@@ -191,6 +212,7 @@ int main(void)
     test_mood_clip_share();
     test_missing_mood_clip_ignored();
     test_pack_change_restarts();
+    test_clip_table_change_with_same_crc();
     test_long_gap_returns_quickly();
     test_no_info_shows_nothing();
     return 0;

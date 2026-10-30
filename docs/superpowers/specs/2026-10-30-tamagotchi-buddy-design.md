@@ -46,14 +46,20 @@ Mood comes from the stats, checked in this order:
 - **Pet page:** DOWN cycles the selection Feed → Play → Pat. OK performs it. This replaces
   the old, unused `pet_page` toggle.
 - **Feeding at fullness ≥ 90** is refused. Stats don't change, the buddy plays its refuse
-  reaction, and the message reads `Not hungry`.
+  reaction, and the pet page shows `Not hungry` in place of the mood word for 3000 ms. Claude's
+  status message on the home page is not touched.
 - **Five pats within 3000 ms** make the buddy dizzy for 3000 ms instead of patting.
 - Reactions last 3000 ms: eat, play, pat, refuse, dizzy.
 
 ### Approval guard
 
-OK approves a prompt only when the prompt has been visible for at least 1000 ms. An earlier OK
-press is ignored. DOWN (deny) has no guard.
+OK approves a prompt only when both are true:
+
+- The prompt has been visible for at least 1000 ms. Visible means the screen is on and no
+  confirmation or passkey screen covers it, so waking the screen restarts the count.
+- No OK press came in the previous 1000 ms, so a run of pats never turns into an approval.
+
+An OK press that fails either check is ignored. DOWN (deny) has no guard.
 
 ## Persistence and offline time
 

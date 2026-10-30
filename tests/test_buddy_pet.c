@@ -47,6 +47,20 @@ static void test_energy_by_activity(void)
     assert(pet.energy == 70);
 }
 
+static void test_energy_counts_short_mixed_spells(void)
+{
+    buddy_pet_t pet;
+    unsigned i;
+
+    buddy_pet_init(&pet);
+    for (i = 0; i < 120U; ++i) {
+        buddy_pet_elapse(&pet, 120, BUDDY_PET_BUSY);
+        buddy_pet_elapse(&pet, 120, BUDDY_PET_AWAKE);
+    }
+    /* 8 h of 2-minute busy and idle spells: 120 * (120/300 + 120/1800) = 56. */
+    assert(pet.energy == 24);
+}
+
 static void test_feed_refused_when_full(void)
 {
     buddy_pet_t pet;
@@ -145,6 +159,7 @@ int main(void)
     test_fullness_decay();
     test_happiness_decay();
     test_energy_by_activity();
+    test_energy_counts_short_mixed_spells();
     test_feed_refused_when_full();
     test_play_pat_and_clamp();
     test_mood_order();

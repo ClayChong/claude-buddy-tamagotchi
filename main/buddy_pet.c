@@ -5,9 +5,11 @@
 #define BUDDY_PET_MAX 100U
 #define BUDDY_PET_FULLNESS_S 864U
 #define BUDDY_PET_HAPPINESS_S 720U
-#define BUDDY_PET_ENERGY_BUSY_S 300U
-#define BUDDY_PET_ENERGY_SLEEP_S 120U
-#define BUDDY_PET_ENERGY_AWAKE_S 1800U
+/* One energy point is 1800 units: 300 s busy, 1800 s awake or 120 s asleep. */
+#define BUDDY_PET_ENERGY_POINT 1800
+#define BUDDY_PET_ENERGY_BUSY 6
+#define BUDDY_PET_ENERGY_AWAKE 1
+#define BUDDY_PET_ENERGY_SLEEP (-15)
 #define BUDDY_PET_FEED 30
 #define BUDDY_PET_FEED_REFUSE 90U
 #define BUDDY_PET_PLAY 20
@@ -44,13 +46,14 @@ void buddy_pet_init(buddy_pet_t *pet)
     pet->energy = BUDDY_PET_START;
     pet->fullness_carry_s = 0;
     pet->happiness_carry_s = 0;
-    pet->energy_carry_s = 0;
-    pet->energy_activity = BUDDY_PET_AWAKE;
+    pet->energy_units = 0;
 }
 
 void buddy_pet_elapse(buddy_pet_t *pet, uint32_t seconds, buddy_pet_activity_t activity)
 {
-    uint32_t energy_period = BUDDY_PET_ENERGY_AWAKE_S;
+    int64_t rate = BUDDY_PET_ENERGY_AWAKE;
+    int64_t units;
+    int64_t steps;
 
     if (pet == NULL) {
         return;
@@ -59,17 +62,21 @@ void buddy_pet_elapse(buddy_pet_t *pet, uint32_t seconds, buddy_pet_activity_t a
                                    BUDDY_PET_FULLNESS_S, false);
     pet->happiness = buddy_pet_step(pet->happiness, &pet->happiness_carry_s, seconds,
                                     BUDDY_PET_HAPPINESS_S, false);
-    if (activity != pet->energy_activity) {
-        pet->energy_activity = activity;
-        pet->energy_carry_s = 0;
-    }
     if (activity == BUDDY_PET_BUSY) {
-        energy_period = BUDDY_PET_ENERGY_BUSY_S;
+        rate = BUDDY_PET_ENERGY_BUSY;
     } else if (activity == BUDDY_PET_SLEEPING) {
-        energy_period = BUDDY_PET_ENERGY_SLEEP_S;
+        rate = BUDDY_PET_ENERGY_SLEEP;
     }
-    pet->energy = buddy_pet_step(pet->energy, &pet->energy_carry_s, seconds, energy_period,
-                                 activity == BUDDY_PET_SLEEPING);
+    units = pet->energy_units + rate * (int64_t)seconds;
+    steps = units / BUDDY_PET_ENERGY_POINT;
+    pet->energy_units = (int32_t)(units - steps * BUDDY_PET_ENERGY_POINT);
+    if (steps >= (int64_t)pet->energy) {
+        pet->energy = 0;
+    } else if (-steps >= (int64_t)(BUDDY_PET_MAX - pet->energy)) {
+        pet->energy = (uint8_t)BUDDY_PET_MAX;
+    } else {
+        pet->energy = (uint8_t)(pet->energy - steps);
+    }
 }
 
 void buddy_pet_add(buddy_pet_t *pet, buddy_pet_stat_t stat, int delta)
