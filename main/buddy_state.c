@@ -14,6 +14,8 @@
 #define BUDDY_PET_CATCH_UP_MAX_S 86400U
 #define BUDDY_REACTION_MS 3000ULL
 #define BUDDY_APPROVAL_GUARD_MS 1000ULL
+/* Each 20 minutes of Claude busy time drops one poop once Claude is idle. */
+#define BUDDY_POOP_BUSY_MS (20ULL * 60ULL * 1000ULL)
 #define BUDDY_PAT_BURST_MS 3000ULL
 #define BUDDY_TOKEN_CELEBRATION_STEP 50000
 
@@ -323,6 +325,13 @@ static void buddy_care(buddy_state_t *state, buddy_care_t care, uint64_t now_ms,
     buddy_pet_save_action(state, now_ms, action);
 }
 
+static void buddy_clean(buddy_state_t *state, uint64_t now_ms, buddy_action_t *action)
+{
+    buddy_pet_clean(&state->pet);
+    buddy_react(state, BUDDY_CHARACTER_CLEAN, now_ms);
+    buddy_pet_save_action(state, now_ms, action);
+}
+
 static void buddy_normal_click(buddy_state_t *state, buddy_key_t key, uint64_t now_ms,
                                buddy_action_t *action)
 {
@@ -607,6 +616,17 @@ static void buddy_update_pet(buddy_state_t *state, uint64_t now_ms)
     }
 }
 
+/* Runs before the event, like buddy_update_pet: busy time adds up across
+ * turns while the bridge reports a running session. */
+static void buddy_count_busy(buddy_state_t *state, uint64_t now_ms)
+{
+    if (state->running > 0 && state->connected && !state->heartbeat_stale &&
+        now_ms > state->busy_counted_ms) {
+        state->busy_ms += now_ms - state->busy_counted_ms;
+    }
+    state->busy_counted_ms = now_ms;
+}
+
 /* Synced UTC epoch now, or 0 before the first time sync. */
 static uint32_t buddy_current_epoch(const buddy_state_t *state, uint64_t now_ms)
 {
@@ -701,6 +721,28 @@ void buddy_state_reinit_keep_pet(buddy_state_t *state, const buddy_settings_snap
     buddy_refresh_character(state, 0);
 }
 
+/* Runs after the event. Once Claude is fully idle (nothing running, no prompt
+ * waiting), every BUDDY_POOP_BUSY_MS of busy time drops one poop; time beyond
+ * a full pile is discarded. */
+static void buddy_drop_poop(buddy_state_t *state, uint64_t now_ms, buddy_action_t *action)
+{
+    bool dropped = false;
+
+    if (state->running > 0 || state->waiting > 0 || !state->connected ||
+        state->heartbeat_stale) {
+        return;
+    }
+    while (state->busy_ms >= BUDDY_POOP_BUSY_MS) {
+        state->busy_ms -= BUDDY_POOP_BUSY_MS;
+        dropped = buddy_pet_add_poop(&state->pet) || dropped;
+    }
+    /* A busier action (celebration settings) wins; the periodic save follows. */
+    if (dropped && (action == NULL || action->type == BUDDY_ACTION_NONE ||
+                    action->type == BUDDY_ACTION_UI_REFRESH)) {
+        buddy_pet_save_action(state, now_ms, action);
+    }
+}
+
 /* The approval guard counts from when the prompt became visible: a hidden
  * prompt (screen off, confirmation or passkey on top) restarts it. */
 static void buddy_update_prompt_visibility(buddy_state_t *state, uint64_t now_ms)
@@ -715,6 +757,93 @@ static void buddy_update_prompt_visibility(buddy_state_t *state, uint64_t now_ms
     state->prompt_visible = visible;
 }
 
+static void buddy_key_click(buddy_state_t *state, const buddy_event_t *event,
+                            uint64_t now_ms, buddy_action_t *action)
+{
+    /* A run of OK presses (pats) never approves: OK needs a second of quiet. */
+    bool ok_quiet = !state->has_last_ok ||
+                    now_ms >= state->last_ok_ms + BUDDY_APPROVAL_GUARD_MS;
+
+    if (event->key == BUDDY_KEY_OK) {
+        state->has_last_ok = true;
+        state->last_ok_ms = now_ms;
+    }
+    if (state->screen_off) {
+        state->screen_off = false;
+        if (action != NULL) {
+            action->type = BUDDY_ACTION_DISPLAY_BACKLIGHT;
+            action->brightness_percent =
+                (uint8_t)(20U + state->brightness_level * 20U);
+        }
+        return;
+    }
+    if (state->confirmation != BUDDY_CONFIRM_NONE && event->key == BUDDY_KEY_OK) {
+        buddy_confirmation_t confirmation = state->confirmation;
+        bool acknowledge = state->confirmation_acknowledge;
+        uint32_t connection_generation = state->confirmation_connection_generation;
+
+        buddy_close_confirmation(state);
+        if (action != NULL) {
+            action->type = confirmation == BUDDY_CONFIRM_UNPAIR
+                               ? BUDDY_ACTION_UNPAIR_CONFIRMED
+                               : BUDDY_ACTION_FACTORY_RESET_CONFIRMED;
+            action->confirmation_acknowledge = acknowledge;
+            action->connection_generation = connection_generation;
+        }
+        return;
+    }
+    if (state->confirmation != BUDDY_CONFIRM_NONE && event->key == BUDDY_KEY_DOWN) {
+        buddy_close_confirmation(state);
+        buddy_set_ui_refresh(action);
+        return;
+    }
+    if (state->confirmation != BUDDY_CONFIRM_NONE) {
+        return;
+    }
+    if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_OK) {
+        /* A press in the prompt's first visible second was meant for
+         * something else. */
+        if (state->prompt_visible && ok_quiet &&
+            now_ms >= state->prompt_visible_ms + BUDDY_APPROVAL_GUARD_MS) {
+            buddy_decide_prompt(state, event, BUDDY_PERMISSION_ONCE, action);
+        }
+    } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_DOWN) {
+        buddy_decide_prompt(state, event, BUDDY_PERMISSION_DENY, action);
+    } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_UP) {
+        if (action != NULL) {
+            action->type = BUDDY_ACTION_UI_SCROLL;
+            action->scroll_delta = -48;
+        }
+    } else if (!buddy_has_prompt(state)) {
+        buddy_normal_click(state, event->key, now_ms, action);
+    }
+}
+
+/* The button driver reports a quick double press as one event. A double OK
+ * cleans the poop pile on the home and pet pages. It never approves a prompt
+ * or confirms a reset; anything else counts as one click. */
+static void buddy_key_double(buddy_state_t *state, const buddy_event_t *event,
+                             uint64_t now_ms, buddy_action_t *action)
+{
+    if (event->key != BUDDY_KEY_OK || state->screen_off) {
+        buddy_key_click(state, event, now_ms, action);
+        return;
+    }
+    if (state->confirmation != BUDDY_CONFIRM_NONE || buddy_has_prompt(state)) {
+        state->has_last_ok = true;
+        state->last_ok_ms = now_ms;
+        return;
+    }
+    if (state->pet.poop > 0U && !state->menu_open &&
+        (state->page == BUDDY_PAGE_HOME || state->page == BUDDY_PAGE_PET)) {
+        state->has_last_ok = true;
+        state->last_ok_ms = now_ms;
+        buddy_clean(state, now_ms, action);
+        return;
+    }
+    buddy_key_click(state, event, now_ms, action);
+}
+
 void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
                         uint64_t now_ms, buddy_action_t *action)
 {
@@ -726,6 +855,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
     }
 
     buddy_update_pet(state, now_ms);
+    buddy_count_busy(state, now_ms);
     buddy_clear_stale_prompt(state, now_ms);
 
     switch (event->type) {
@@ -835,66 +965,12 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
     case BUDDY_EVENT_PERMISSION_SEND_RESULT:
         buddy_apply_permission_result(state, &event->permission_result, now_ms, action);
         break;
-    case BUDDY_EVENT_KEY_CLICK: {
-        /* A run of OK presses (pats) never approves: OK needs a second of quiet. */
-        bool ok_quiet = !state->has_last_ok ||
-                        now_ms >= state->last_ok_ms + BUDDY_APPROVAL_GUARD_MS;
-
-        if (event->key == BUDDY_KEY_OK) {
-            state->has_last_ok = true;
-            state->last_ok_ms = now_ms;
-        }
-        if (state->screen_off) {
-            state->screen_off = false;
-            if (action != NULL) {
-                action->type = BUDDY_ACTION_DISPLAY_BACKLIGHT;
-                action->brightness_percent =
-                    (uint8_t)(20U + state->brightness_level * 20U);
-            }
-            break;
-        }
-        if (state->confirmation != BUDDY_CONFIRM_NONE && event->key == BUDDY_KEY_OK) {
-            buddy_confirmation_t confirmation = state->confirmation;
-            bool acknowledge = state->confirmation_acknowledge;
-            uint32_t connection_generation = state->confirmation_connection_generation;
-
-            buddy_close_confirmation(state);
-            if (action != NULL) {
-                action->type = confirmation == BUDDY_CONFIRM_UNPAIR
-                                   ? BUDDY_ACTION_UNPAIR_CONFIRMED
-                                   : BUDDY_ACTION_FACTORY_RESET_CONFIRMED;
-                action->confirmation_acknowledge = acknowledge;
-                action->connection_generation = connection_generation;
-            }
-            break;
-        }
-        if (state->confirmation != BUDDY_CONFIRM_NONE && event->key == BUDDY_KEY_DOWN) {
-            buddy_close_confirmation(state);
-            buddy_set_ui_refresh(action);
-            break;
-        }
-        if (state->confirmation != BUDDY_CONFIRM_NONE) {
-            break;
-        }
-        if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_OK) {
-            /* A press in the prompt's first visible second was meant for
-             * something else. */
-            if (state->prompt_visible && ok_quiet &&
-                now_ms >= state->prompt_visible_ms + BUDDY_APPROVAL_GUARD_MS) {
-                buddy_decide_prompt(state, event, BUDDY_PERMISSION_ONCE, action);
-            }
-        } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_DOWN) {
-            buddy_decide_prompt(state, event, BUDDY_PERMISSION_DENY, action);
-        } else if (buddy_has_actionable_prompt(state) && event->key == BUDDY_KEY_UP) {
-            if (action != NULL) {
-                action->type = BUDDY_ACTION_UI_SCROLL;
-                action->scroll_delta = -48;
-            }
-        } else if (!buddy_has_prompt(state)) {
-            buddy_normal_click(state, event->key, now_ms, action);
-        }
+    case BUDDY_EVENT_KEY_CLICK:
+        buddy_key_click(state, event, now_ms, action);
         break;
-    }
+    case BUDDY_EVENT_KEY_DOUBLE:
+        buddy_key_double(state, event, now_ms, action);
+        break;
     case BUDDY_EVENT_KEY_LONG:
         if (event->key == BUDDY_KEY_OK && state->confirmation == BUDDY_CONFIRM_NONE &&
             !buddy_has_prompt(state)) {
@@ -917,6 +993,7 @@ void buddy_state_reduce(buddy_state_t *state, const buddy_event_t *event,
         break;
     }
 
+    buddy_drop_poop(state, now_ms, action);
     buddy_update_prompt_visibility(state, now_ms);
     buddy_refresh_character(state, now_ms);
 }
@@ -971,6 +1048,7 @@ void buddy_state_snapshot(const buddy_state_t *state, buddy_ui_snapshot_t *snaps
     snapshot->pet_happiness = state->pet.happiness;
     snapshot->pet_energy = state->pet.energy;
     snapshot->mood = buddy_pet_mood(&state->pet);
+    snapshot->poop = state->pet.poop;
     buddy_copy(snapshot->care_message, sizeof(snapshot->care_message), state->care_message);
     buddy_copy(snapshot->name, sizeof(snapshot->name), state->name);
     buddy_copy(snapshot->owner, sizeof(snapshot->owner), state->owner);

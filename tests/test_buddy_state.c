@@ -1317,6 +1317,190 @@ static void test_ok_burst_never_approves(void)
     assert(action.type == BUDDY_ACTION_PERMISSION);
 }
 
+#define TEST_POOP_BUSY_MS (20ULL * 60ULL * 1000ULL)
+
+/* Heartbeats every 10 s from from_ms to to_ms; returns the last action. */
+static buddy_action_t test_session(buddy_state_t *state, unsigned running, unsigned waiting,
+                                   uint64_t from_ms, uint64_t to_ms)
+{
+    buddy_event_t heartbeat = test_heartbeat_event(0, running);
+    buddy_action_t action = {0};
+    uint64_t t;
+
+    heartbeat.heartbeat.waiting = waiting;
+    for (t = from_ms; t <= to_ms; t += 10000U) {
+        buddy_state_reduce(state, &heartbeat, t, &action);
+    }
+    return action;
+}
+
+static void test_busy_time_drops_poop_when_idle(void)
+{
+    buddy_state_t state;
+    buddy_action_t action;
+    buddy_ui_snapshot_t snapshot;
+
+    buddy_state_init(&state, NULL);
+    action = test_session(&state, 1, 0, 1000, 1000 + TEST_POOP_BUSY_MS);
+    assert(state.pet.poop == 0);
+    action = test_session(&state, 0, 0, 1000 + TEST_POOP_BUSY_MS + 10000,
+                          1000 + TEST_POOP_BUSY_MS + 10000);
+    assert(state.pet.poop == 1);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    assert(action.pet == buddy_pet_pack(&state.pet, 0));
+    buddy_state_snapshot(&state, &snapshot);
+    assert(snapshot.poop == 1);
+    assert(snapshot.mood == BUDDY_MOOD_STINKY);
+    test_session(&state, 0, 0, 1000 + TEST_POOP_BUSY_MS + 20000,
+                 1000 + TEST_POOP_BUSY_MS + 60000);
+    assert(state.pet.poop == 1);
+}
+
+static void test_short_busy_spell_leaves_no_poop(void)
+{
+    buddy_state_t state;
+
+    buddy_state_init(&state, NULL);
+    test_session(&state, 1, 0, 1000, 1000 + TEST_POOP_BUSY_MS - 20000);
+    test_session(&state, 0, 0, 1000 + TEST_POOP_BUSY_MS - 10000,
+                 1000 + TEST_POOP_BUSY_MS + 60000);
+    assert(state.pet.poop == 0);
+}
+
+static void test_busy_time_adds_up_across_turns(void)
+{
+    buddy_state_t state;
+
+    buddy_state_init(&state, NULL);
+    test_session(&state, 1, 0, 1000, 601000);
+    test_session(&state, 0, 0, 611000, 901000);
+    assert(state.pet.poop == 0);
+    test_session(&state, 1, 0, 901000, 1491000);
+    assert(state.pet.poop == 0);
+    test_session(&state, 0, 0, 1501000, 1501000);
+    assert(state.pet.poop == 1);
+}
+
+static void test_no_poop_while_prompt_waits(void)
+{
+    buddy_state_t state;
+
+    buddy_state_init(&state, NULL);
+    test_session(&state, 1, 0, 1000, 1000 + TEST_POOP_BUSY_MS);
+    test_session(&state, 0, 1, 1000 + TEST_POOP_BUSY_MS + 10000,
+                 1000 + TEST_POOP_BUSY_MS + 30000);
+    assert(state.pet.poop == 0);
+    test_session(&state, 0, 0, 1000 + TEST_POOP_BUSY_MS + 40000,
+                 1000 + TEST_POOP_BUSY_MS + 40000);
+    assert(state.pet.poop == 1);
+}
+
+static void test_poop_pile_caps_at_four(void)
+{
+    buddy_state_t state;
+
+    buddy_state_init(&state, NULL);
+    test_session(&state, 1, 0, 1000, 1000 + 5U * TEST_POOP_BUSY_MS);
+    test_session(&state, 0, 0, 1000 + 5U * TEST_POOP_BUSY_MS + 10000,
+                 1000 + 5U * TEST_POOP_BUSY_MS + 10000);
+    assert(state.pet.poop == 4);
+    /* The pile stays full; cleaning does not release a backlog. */
+    state.pet.poop = 0;
+    test_session(&state, 0, 0, 1000 + 5U * TEST_POOP_BUSY_MS + 20000,
+                 1000 + 5U * TEST_POOP_BUSY_MS + 20000);
+    assert(state.pet.poop == 0);
+}
+
+static void test_double_ok_cleans_pile(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_OK};
+    buddy_event_t tick = {.type = BUDDY_EVENT_TICK};
+
+    buddy_state_init(&state, NULL);
+    state.pet.poop = 3;
+    buddy_state_reduce(&state, &twice, 1000, &action);
+    assert(state.pet.poop == 0);
+    assert(state.pet.happiness == 80);
+    assert(state.character == BUDDY_CHARACTER_CLEAN);
+    assert(action.type == BUDDY_ACTION_PET_SAVE);
+    assert(action.pet == buddy_pet_pack(&state.pet, 0));
+    buddy_state_reduce(&state, &tick, 4000, &action);
+    assert(state.character != BUDDY_CHARACTER_CLEAN);
+}
+
+static void test_double_ok_cleans_from_pet_page(void)
+{
+    buddy_state_t state;
+    buddy_event_t up = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_UP};
+    buddy_event_t twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_OK};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &up, 1000, NULL);
+    state.pet.poop = 2;
+    buddy_state_reduce(&state, &twice, 2000, NULL);
+    assert(state.pet.poop == 0);
+    assert(state.pet.fullness == 80);
+}
+
+static void test_double_ok_without_poop_is_one_click(void)
+{
+    buddy_state_t state;
+    buddy_event_t twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_OK};
+    buddy_event_t down_twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_DOWN};
+    buddy_event_t up = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_UP};
+
+    buddy_state_init(&state, NULL);
+    buddy_state_reduce(&state, &twice, 1000, NULL);
+    assert(state.pet.happiness == 85);
+    assert(state.character == BUDDY_CHARACTER_PAT);
+    buddy_state_reduce(&state, &up, 5000, NULL);
+    buddy_state_reduce(&state, &down_twice, 5000, NULL);
+    assert(state.care_selection == BUDDY_CARE_PLAY);
+}
+
+static void test_double_ok_never_approves_or_confirms(void)
+{
+    buddy_state_t state;
+    buddy_action_t action = {0};
+    buddy_event_t heartbeat = test_heartbeat_event(0, 0);
+    buddy_event_t prompt = test_prompt_event("req-1", "Bash", "git push", 0, 1);
+    buddy_event_t twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_OK};
+    buddy_event_t ok = {.type = BUDDY_EVENT_KEY_CLICK, .key = BUDDY_KEY_OK};
+
+    buddy_state_init(&state, NULL);
+    state.pet.poop = 2;
+    buddy_state_reduce(&state, &heartbeat, 1000, NULL);
+    buddy_state_reduce(&state, &prompt, 1000, NULL);
+    buddy_state_reduce(&state, &twice, 5000, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
+    assert(state.pet.poop == 2);
+    /* It still counts as an OK press for the quiet second. */
+    buddy_state_reduce(&state, &ok, 5500, &action);
+    assert(action.type != BUDDY_ACTION_PERMISSION);
+    buddy_state_reduce(&state, &ok, 7000, &action);
+    assert(action.type == BUDDY_ACTION_PERMISSION);
+
+    buddy_state_init(&state, NULL);
+    state.pet.poop = 2;
+    state.confirmation = BUDDY_CONFIRM_UNPAIR;
+    buddy_state_reduce(&state, &twice, 1000, &action);
+    assert(action.type != BUDDY_ACTION_UNPAIR_CONFIRMED);
+    assert(state.confirmation == BUDDY_CONFIRM_UNPAIR);
+    assert(state.pet.poop == 2);
+}
+
+static void test_reinit_keeps_poop(void)
+{
+    buddy_state_t state;
+
+    buddy_state_init(&state, NULL);
+    state.pet.poop = 3;
+    buddy_state_reinit_keep_pet(&state, NULL);
+    assert(state.pet.poop == 3);
+}
+
 int main(void)
 {
     test_offline_initialization();
@@ -1339,6 +1523,16 @@ int main(void)
     test_reinit_keeps_live_pet();
     test_wake_restarts_approval_guard();
     test_ok_burst_never_approves();
+    test_busy_time_drops_poop_when_idle();
+    test_short_busy_spell_leaves_no_poop();
+    test_busy_time_adds_up_across_turns();
+    test_no_poop_while_prompt_waits();
+    test_poop_pile_caps_at_four();
+    test_double_ok_cleans_pile();
+    test_double_ok_cleans_from_pet_page();
+    test_double_ok_without_poop_is_one_click();
+    test_double_ok_never_approves_or_confirms();
+    test_reinit_keeps_poop();
     test_heartbeat_mapping();
     test_character_priority();
     test_timeout_clears_prompt();

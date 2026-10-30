@@ -72,6 +72,9 @@ typedef struct {
     uint64_t prompt_visible_ms;
     bool has_last_ok;
     uint64_t last_ok_ms;
+    /* Busy time not yet turned into poop, and when it was last counted. */
+    uint64_t busy_ms;
+    uint64_t busy_counted_ms;
     char care_message[BUDDY_CARE_MESSAGE_MAX];
     uint64_t care_message_until_ms;
 } buddy_state_t;

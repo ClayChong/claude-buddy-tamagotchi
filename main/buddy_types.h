@@ -132,6 +132,7 @@ typedef enum {
     BUDDY_EVENT_PERMISSION_SEND_RESULT,
     BUDDY_EVENT_KEY_CLICK,
     BUDDY_EVENT_KEY_LONG,
+    BUDDY_EVENT_KEY_DOUBLE,
     BUDDY_EVENT_TICK,
 } buddy_event_type_t;
 
@@ -315,5 +316,6 @@ typedef struct {
     uint8_t pet_happiness;
     uint8_t pet_energy;
     buddy_mood_t mood;
+    uint8_t poop;
     char care_message[BUDDY_CARE_MESSAGE_MAX];
 } buddy_ui_snapshot_t;
