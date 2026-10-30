@@ -86,3 +86,8 @@ add_executable(test_buddy_anim test_buddy_anim.c ../main/buddy_anim.c ../main/bu
 target_include_directories(test_buddy_anim PRIVATE ../main)
 target_compile_options(test_buddy_anim PRIVATE -Wall -Wextra -Werror)
 add_test(NAME buddy_anim COMMAND test_buddy_anim)
+
+add_executable(test_buddy_pet test_buddy_pet.c ../main/buddy_pet.c)
+target_include_directories(test_buddy_pet PRIVATE ../main)
+target_compile_options(test_buddy_pet PRIVATE -Wall -Wextra -Werror)
+add_test(NAME buddy_pet COMMAND test_buddy_pet)
