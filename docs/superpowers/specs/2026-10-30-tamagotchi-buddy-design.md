@@ -145,7 +145,8 @@ celebrate, refuse → dizzy. They have no mood idles.
 - Claude busy time (the bridge reports `running > 0`) adds up across turns. Each 20 minutes
   of it drops one poop the next time Claude is fully idle: nothing running and no prompt
   waiting. Busy time is not saved across reboots.
-- The pile holds at most 4 poops. Busy time that would overflow a full pile is discarded.
+- The pile holds at most 4 poops. Busy time stops counting while the pile is full, and time
+  that would overflow it at a drop is discarded, so cleaning never releases a backlog.
 - Each uncleaned poop costs 1 extra happiness point per 1800 s, including offline catch-up.
 - Mood order becomes: hungry, stinky (any poop), tired, sad, happy, normal.
 - A double OK press on the home or pet page cleans the whole pile and plays the `clean`

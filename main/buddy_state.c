@@ -617,11 +617,12 @@ static void buddy_update_pet(buddy_state_t *state, uint64_t now_ms)
 }
 
 /* Runs before the event, like buddy_update_pet: busy time adds up across
- * turns while the bridge reports a running session. */
+ * turns while the bridge reports a running session. A full pile stops the
+ * count, so cleaning never releases a backlog. */
 static void buddy_count_busy(buddy_state_t *state, uint64_t now_ms)
 {
     if (state->running > 0 && state->connected && !state->heartbeat_stale &&
-        now_ms > state->busy_counted_ms) {
+        state->pet.poop < BUDDY_PET_POOP_MAX && now_ms > state->busy_counted_ms) {
         state->busy_ms += now_ms - state->busy_counted_ms;
     }
     state->busy_counted_ms = now_ms;

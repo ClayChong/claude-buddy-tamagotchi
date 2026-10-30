@@ -1411,6 +1411,22 @@ static void test_poop_pile_caps_at_four(void)
     assert(state.pet.poop == 0);
 }
 
+static void test_full_pile_stops_counting_busy_time(void)
+{
+    buddy_state_t state;
+    buddy_event_t twice = {.type = BUDDY_EVENT_KEY_DOUBLE, .key = BUDDY_KEY_OK};
+    uint64_t cleaned = 1000 + 3U * TEST_POOP_BUSY_MS;
+
+    buddy_state_init(&state, NULL);
+    state.pet.poop = 4;
+    test_session(&state, 1, 0, 1000, cleaned);
+    buddy_state_reduce(&state, &twice, cleaned + 1, NULL);
+    assert(state.pet.poop == 0);
+    test_session(&state, 1, 0, cleaned + 10000, cleaned + 600000);
+    test_session(&state, 0, 0, cleaned + 610000, cleaned + 610000);
+    assert(state.pet.poop == 0);
+}
+
 static void test_double_ok_cleans_pile(void)
 {
     buddy_state_t state;
@@ -1528,6 +1544,7 @@ int main(void)
     test_busy_time_adds_up_across_turns();
     test_no_poop_while_prompt_waits();
     test_poop_pile_caps_at_four();
+    test_full_pile_stops_counting_busy_time();
     test_double_ok_cleans_pile();
     test_double_ok_cleans_from_pet_page();
     test_double_ok_without_poop_is_one_click();
